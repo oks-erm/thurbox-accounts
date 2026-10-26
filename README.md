@@ -9,17 +9,40 @@ conversation handoff. Includes the Accounts pane (Alt+F7).
 
 Requires Python 3.11+, Claude Code 2.1.268+, Thurbox 2.75.2+ and local tmux.
 
+The repository is private: Git must have access through your GitHub login.
+Clone it first, then run the installer from that checkout:
+
 ```sh
-thurbox-cli extension install git+https://github.com/oks-erm/thurbox-accounts.git
-# Use the installed launcher, or link it into a directory on your PATH:
-mkdir -p ~/.local/bin
-ln -s ~/.config/thurbox/extensions/thurbox-accounts/bin/thurbox-accounts ~/.local/bin/thurbox-accounts
-thurbox-accounts ui-install
+git clone https://github.com/oks-erm/thurbox-accounts.git &&
+  ./thurbox-accounts/bin/thurbox-accounts install
 ```
 
-For a local checkout, use `thurbox-cli extension install /absolute/path/to/thurbox-accounts`.
-In Thurbox Interface settings, grant the Accounts pane run/program capabilities
-yourself. Installation does not grant them. Existing edited panes are preserved.
+If already cloned, run from inside that checkout:
+
+```sh
+git pull --ff-only && ./bin/thurbox-accounts install
+```
+
+The installer prints each stage, stops at the first failure, and safely supports
+reruns. It installs the local extension, prepares/validates the Accounts pane
+without opening Thurbox, and links `~/.local/bin/thurbox-accounts`. It preserves
+unrelated commands and custom pane edits. If that directory is outside your PATH,
+use the absolute command path printed on success.
+
+For a nonstandard Thurbox location:
+
+```sh
+./bin/thurbox-accounts --thurbox-cli /absolute/path/to/thurbox-cli install
+```
+
+Then open Thurbox, press **Alt+F7**, and grant the Accounts pane run/program
+capabilities in Interface settings yourself. Installation never grants them.
+
+**Thurbox 2.75.2 installer issue:** do not use `extension install git+https://…`.
+It fails with “is a repository: it is cloned, not fetched file by file” before
+cloning. The installer above uses `extension install /local/checkout`, which
+works on that version. `plugin install` is a separate command and does not install
+this extension.
 
 ## Use
 

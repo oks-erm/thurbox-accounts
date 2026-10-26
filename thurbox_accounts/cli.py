@@ -20,6 +20,8 @@ def parser():
         if verb == 'start':
             command.add_argument('--repo', type=Path, required=True)
             command.add_argument('--name', dest='session_name', required=True)
+    installer = commands.add_parser('install', help='Install this cloned checkout, command and Accounts pane')
+    installer.add_argument('--bin-dir', type=Path, default=Path.home() / '.local/bin')
     commands.add_parser('list')
     handoff = commands.add_parser('handoff')
     handoff.add_argument('--session')
@@ -35,6 +37,10 @@ def parser():
 
 
 def run(args):
+    if args.account_action == 'install':
+        from .install import install_checkout
+        print(dumps(install_checkout(args.thurbox_cli, args.accounts_dir, args.claude, args.bin_dir)))
+        return 0
     profiles = Profiles(args.accounts_dir)
     service = Accounts(profiles, Claude(args.claude), Thurbox([args.thurbox_cli]))
     verb = args.account_action

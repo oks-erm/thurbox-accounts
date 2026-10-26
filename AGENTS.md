@@ -48,3 +48,13 @@ Profiles keep the old data path intentionally; do not auto-migrate or rename it.
 Run account/unit/distribution suites and compile checks before commit, real tmux
 smoke after transport changes, and inspect CI after push. Smoke uses synthetic
 auth; do not claim Enterprise SSO or actual cross-organization transfer passed.
+
+## Installation regression
+
+Thurbox 2.75.2 advertises git+ extension installation but fetches its manifest
+through an unsupported Git source path; it fails before cloning. Do not put that
+command back into README. `install.py` orchestrates local-directory installation,
+interface materialization, checked pane delivery and non-overwriting command
+linking. Its `install` action runs from a cloned checkout; no TUI or login needed.
+Validate the exact README clone/install flow in a clean isolated profile and
+rerun it, not only a local extension install in an existing configured profile.

@@ -30,3 +30,22 @@ closed without login and a successful authenticated probe.
   extension now ships only its workflow payloads as 0.2.1 (51 tests pass).
 - Account data paths and capability grants were preserved. Real SSO remains
   unverified; no actual Enterprise conversation was transferred.
+
+## Installer fix — v0.1.1
+
+Reproduced the previous README Git install command on Thurbox 2.75.2 in an
+isolated profile: exit 1 with `is a repository: it is cloned, not fetched file
+by file`. The upstream extension loader rejects Git sources before cloning;
+this is a command failure, not a TUI crash. The prior local-path installation
+test did not cover that advertised Git install route.
+
+The README now uses explicit Git clone plus the checkout's `install` action.
+This installer reports stages, stops on failure, initializes a first-use
+interface with the public CLI, validates the pane and preserves command links
+on rerun. No running TUI, login, credential reads or capability grants needed.
+
+26 tests and compile checks pass. Real first-install and repeat-install tests
+passed with both an empty custom interface and the default interface path in
+isolated configurations. Latest fixture: `/private/tmp/tbx-install-default-ui-4pmkmpy_`.
+Independent review found no blockers; relative CLI/account paths are normalized
+before invoking the installed launcher. Authentication behavior is unchanged.

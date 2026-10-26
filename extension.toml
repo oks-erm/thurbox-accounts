@@ -1,7 +1,7 @@
 name = "thurbox-accounts"
 description = "Standalone Claude Enterprise account profiles and confirmed conversation handoff"
 config_version = 1
-version = "0.1.0"
+version = "0.1.1"
 
 [[files]]
 path = "bin/thurbox-accounts"
@@ -42,3 +42,6 @@ path = "thurbox_accounts/ui/accounts.lua"
 
 [[files]]
 path = "docs/VALIDATION.md"
+
+[[files]]
+path = "thurbox_accounts/install.py"
