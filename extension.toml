@@ -1,0 +1,44 @@
+name = "thurbox-accounts"
+description = "Standalone Claude Enterprise account profiles and confirmed conversation handoff"
+config_version = 1
+version = "0.1.0"
+
+[[files]]
+path = "bin/thurbox-accounts"
+executable = true
+
+[[files]]
+path = "README.md"
+
+[[files]]
+path = "docs/ACCOUNTS.md"
+
+[[files]]
+path = "thurbox_accounts/__init__.py"
+
+[[files]]
+path = "thurbox_accounts/__main__.py"
+
+[[files]]
+path = "thurbox_accounts/accounts.py"
+
+[[files]]
+path = "thurbox_accounts/accounts_ui.py"
+
+[[files]]
+path = "thurbox_accounts/cli.py"
+
+[[files]]
+path = "thurbox_accounts/core.py"
+
+[[files]]
+path = "thurbox_accounts/runtime.py"
+
+[[files]]
+path = "thurbox_accounts/thurbox.py"
+
+[[files]]
+path = "thurbox_accounts/ui/accounts.lua"
+
+[[files]]
+path = "docs/VALIDATION.md"
