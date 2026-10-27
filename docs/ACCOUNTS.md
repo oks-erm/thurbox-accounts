@@ -38,7 +38,7 @@ in the browser. The CLI cannot independently certify the account's Enterprise ti
 thurbox-accounts ui-install
 ```
 
-Press **Alt+F7** to open/leave Accounts. In **Ctrl+, → ]**, select Accounts and
+Press **F7** to open/leave Accounts. In **Ctrl+, → ]**, select Accounts and
 grant its **run/program** capabilities yourself. Installation never grants them.
 Tab moves between profile, repository, new-session name and sharing-order fields. Alt+r lists
 profiles; type the selected profile's name in the first field.

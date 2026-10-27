@@ -98,3 +98,11 @@ receipt without retrying or claiming confirmed submission.
 Installed: `~/Applications/Thurbox Accounts.app`, backed by the installed extension.
 SSO and actual native cross-Enterprise behavior remain unverified: no real
 profiles are configured. The native proof gate remains closed.
+
+## Accounts shortcut fix
+
+Removed Alt+F7 and its modifier glyph from the Accounts control; plain F7 now
+opens/closes Accounts. Live plugin check reports no conflicts, warnings or
+dropped pills. Seven UI-delivery/installer tests pass. An isolated real TUI
+received F7 terminal input and changed focus agent → accounts → agent.
+Fixture: `/private/tmp/tbx-f7-check-opqmqooy`. No sessions, model calls or grants.

@@ -3,7 +3,7 @@
 A standalone Thurbox extension for switching between Claude Enterprise accounts.
 Each profile has a separate native SSO login and configuration directory. Start
 new sessions under a selected account, or enable one-click switching on a
-selected conversation with one shared local history. Includes the Accounts pane (Alt+F7).
+selected conversation with one shared local history. Includes the Accounts pane (F7).
 
 ## Install
 
@@ -37,7 +37,7 @@ For a nonstandard Thurbox location:
 ./bin/thurbox-accounts --thurbox-cli /absolute/path/to/thurbox-cli install
 ```
 
-Then open Thurbox, press **Alt+F7**, and grant the Accounts pane run/program
+Then open Thurbox, press **F7**, and grant the Accounts pane run/program
 capabilities in Interface settings yourself. Installation never grants them.
 
 **Thurbox 2.75.2 installer issue:** do not use `extension install git+https://…`.
@@ -126,7 +126,7 @@ Use the new guarded session returned by the command; leave the original stopped.
 
 ## Switch when the account reaches its limit
 
-Open **Alt+F7**, select the current shared session and use **Alt+x Switch to
+Open **F7**, select the current shared session and use **Alt+x Switch to
 ACCOUNT**. The pane shows the next account before switching. Switches cycle the
 approved order, stop the source and resume the same conversation under the next
 account. There is **no per-switch fork, history copy or extra model request**;

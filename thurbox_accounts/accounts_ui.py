@@ -48,4 +48,4 @@ def install(command: str, accounts_dir: Path, claude: str):
     profiles.write('ui-install.json', delivered)
     check = thurbox.call('plugin', 'check')
     return dict(pane=str(destination), backup=str(backup) if backup else None, checked=check,
-                next='Alt+F7 opens Accounts. Grant run/program in Ctrl+, → ] → t. No capabilities were granted.')
+                next='F7 opens Accounts. Grant run/program in Ctrl+, → ] → t. No capabilities were granted.')

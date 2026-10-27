@@ -52,7 +52,7 @@ return {
   name = "accounts", slot = "center", slot_mode = "switch", pure = true,
   focusable = true, input = "session", capabilities = { "run", "program" },
   keys = {
-    { key = "alt+f7", action = "accounts.open", desc = "Accounts", scope = "global" },
+    { key = "f7", action = "accounts.open", desc = "Accounts", scope = "global" },
     { key = "alt+r", action = "accounts.list", desc = "List profiles" },
     { key = "alt+a", action = "accounts.add", desc = "Add profile" },
     { key = "alt+l", action = "accounts.login", desc = "Enterprise SSO login" },
@@ -77,7 +77,7 @@ return {
       return ui.panel({ title = "Accounts", focused = ctx.focused, body = {
         line("Grant Accounts run/program capabilities: Ctrl+, → ] → t.", 2),
         line("Each Enterprise login has a separate private Claude configuration directory.", 2),
-        line("Alt+F7 returns to the previous pane.") } })
+        line("F7 returns to the previous pane.") } })
     end
     local selected = store.selected
     if selected then

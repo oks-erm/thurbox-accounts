@@ -64,6 +64,6 @@ def install_checkout(command, accounts_dir, claude, bin_dir, *, source=None):
         else:
             link.symlink_to(launcher)
         return dict(installed='thurbox-accounts', launcher=str(launcher), command=str(link),
-                    pane=pane, agent=agent, next='Installation complete. Open Thurbox and press Alt+F7. Grant Accounts capabilities yourself.')
+                    pane=pane, agent=agent, next='Installation complete. Open Thurbox and press F7. Grant Accounts capabilities yourself.')
     except (OSError, ValueError, RuntimeError, TimeoutError) as error:
         raise RuntimeError(f'{stage} failed: {error}') from error
