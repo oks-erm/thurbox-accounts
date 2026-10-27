@@ -58,3 +58,21 @@ interface materialization, checked pane delivery and non-overwriting command
 linking. Its `install` action runs from a cloned checkout; no TUI or login needed.
 Validate the exact README clone/install flow in a clean isolated profile and
 rerun it, not only a local extension install in an existing configured profile.
+
+## Shared conversations (0.2.0)
+
+`shared.py` owns selected canonical history/aliases and serialized transitions;
+`guard.py` owns native hooks and process-lifetime writer locking. `shared_probe.py`
+is an opt-in paid synthetic native proof; never generate a real proof from fake
+accounts/tests. `agent_install.py` additively registers an absolute
+`claude-accounts` agent and backs up agents.toml; default Claude is unchanged.
+Only selected UUID transcript + UUID sidecar directory are linked, never entire
+config/project directories. Keep managed identity/order/build proof checks,
+durable owner reservation, unknown-state refusals and orphan evidence.
+No model request/fork on switch. Stop is safe only for confirmed native quota
+state with no workers, or an explicitly stopped source with no pending workers.
+Never clear a stale native_pid/starting record merely because its writer lock is
+free: an orphan may survive. Preserve replaced aliases for manual recovery.
+`examples/shared_smoke.py` exercises real tmux A→B→A with synthetic Claude and no
+API calls. Run it after shared transport/supervisor changes, then unit/compile
+checks, live plugin check and installer rerun. No CI workflow or deployment exists.

@@ -22,6 +22,18 @@ def parser():
             command.add_argument('--name', dest='session_name', required=True)
     installer = commands.add_parser('install', help='Install this cloned checkout, command and Accounts pane')
     installer.add_argument('--bin-dir', type=Path, default=Path.home() / '.local/bin')
+    verification = commands.add_parser('verify-shared', help='Native shared-history proof; synthetic model requests up to $0.25 each')
+    verification.add_argument('profiles', nargs='+')
+    enrollment = commands.add_parser('enable-shared', help='Approve one selected stopped conversation for ordered account profiles')
+    enrollment.add_argument('--session', required=True)
+    enrollment.add_argument('--profile', action='append', required=True)
+    enrollment.add_argument('--consent', action='store_true')
+    for action in ('switch','shared-status','recover-shared'):
+        command = commands.add_parser(action)
+        command.add_argument('conversation', nargs='?')
+        command.add_argument('--session')
+        if action == 'switch':
+            command.add_argument('--expected-profile')
     commands.add_parser('list')
     handoff = commands.add_parser('handoff')
     handoff.add_argument('--session')
@@ -44,6 +56,34 @@ def run(args):
     profiles = Profiles(args.accounts_dir)
     service = Accounts(profiles, Claude(args.claude), Thurbox([args.thurbox_cli]))
     verb = args.account_action
+    if verb in {'verify-shared','enable-shared','switch','shared-status','recover-shared'}:
+        from .shared import Shared
+        shared = Shared(service)
+        if verb == 'verify-shared':
+            from .shared_probe import verify
+            result = verify(service,args.profiles)
+        elif verb == 'enable-shared':
+            result = shared.enroll(args.session,args.profile,consent=args.consent)
+        else:
+            conversation = args.conversation
+            if args.session and not conversation:
+                row = service.thurbox.call('session','get',args.session)
+                conversation = row.get('agent_session_id')
+                record = shared.load(conversation)
+                if verb == 'switch' and row.get('id') != record['allowed_session']:
+                    raise ValueError('Select the current managed session before switching')
+            elif not conversation or args.session:
+                raise ValueError('Specify a conversation UUID or --session REF')
+            if verb == 'switch':
+                result = shared.switch(conversation,expected_profile=args.expected_profile)
+            elif verb == 'recover-shared':
+                result = shared.recover(conversation)
+            else:
+                result = shared.load(conversation)
+                result['runtime'] = shared._runtime(conversation)
+                result['next_profile'] = result['profiles'][(result['index']+1)%len(result['profiles'])]
+        print(dumps(result))
+        return 0
     if verb == 'add':
         result = profiles.add(args.name, args.label)
     elif verb == 'list':

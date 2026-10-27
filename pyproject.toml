@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thurbox-accounts"
-version = "0.1.1"
+version = "0.2.0"
 description = "Standalone Claude Enterprise account switching for Thurbox"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
 thurbox-accounts = "thurbox_accounts.cli:main"
+thurbox-accounts-agent = "thurbox_accounts.guard:main"
 
 [tool.setuptools.packages.find]
 include = ["thurbox_accounts*"]

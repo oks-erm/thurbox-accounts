@@ -35,8 +35,16 @@ local function launch_login()
   state.login = true
 end
 local view_height = 0
-local labels = { "Profile / target (type a listed name)", "Repository (absolute path)", "New session name" }
-local fields = { "profile", "repo", "session_name" }
+local function next_account()
+  local selected = store.selected
+  if not selected then return nil end
+  local answer = (thurbox.runs or {})["shared-status-" .. selected]
+  if answer and answer.state == "done" and answer.ok then
+    return (answer.stdout or ""):match('"next_profile"%s*:%s*"([a-z0-9-]+)"')
+  end
+end
+local labels = { "Profile / target (type a listed name)", "Repository (absolute path)", "New session name", "Sharing order: account-a,account-b (approves context access)" }
+local fields = { "profile", "repo", "session_name", "sharing_order" }
 local function line(s, height)
   return { type = "text", len = height or 1, text = s, style = { fg = theme.text } }
 end
@@ -53,6 +61,9 @@ return {
     { key = "alt+p", action = "accounts.preview", desc = "Preview selected session handoff" },
     { key = "alt+y", action = "accounts.confirm", desc = "Confirm displayed transfer" },
     { key = "alt+v", action = "accounts.verify", desc = "Verify native handoff (two test requests)" },
+    { key = "alt+e", action = "accounts.enable_shared", desc = "Enable shared history for entered account order" },
+    { key = "alt+x", action = "accounts.switch", desc = "Switch selected shared conversation to next account" },
+    { key = "alt+i", action = "accounts.shared_status", desc = "Shared conversation status and next account" },
     { key = "alt+b", action = "accounts.back", desc = "Back from login" },
   },
   pills = { { action = "accounts.open", label = "Accounts", priority = 10 } },
@@ -68,7 +79,16 @@ return {
         line("Each Enterprise login has a separate private Claude configuration directory.", 2),
         line("Alt+F7 returns to the previous pane.") } })
     end
-    local children = {}
+    local selected = store.selected
+    if selected then
+      run("shared-status-" .. selected, BASE .. " shared-status --session " .. quote(selected),
+          { machine = "local", timeout = 30, ttl = 5 })
+    end
+    local next = next_account()
+    local switch_line = next and ui.row({ width = ctx.width }):button(
+      "[ Alt+x Switch to " .. next .. " ]", nil, "key:alt+x", "switch-account"):spans_list()
+      or "Select a shared session to switch accounts."
+    local children = { line(switch_line) }
     for i, name in ipairs(fields) do
       children[#children + 1] = textinput.node(field(name), {
         label = labels[i], focused = ctx.focused and (state.field or 1) == i })
@@ -76,6 +96,7 @@ return {
     children[#children + 1] = line("Tab: next field  |  Alt+r list  Alt+a add  Alt+l SSO  Alt+s status")
     children[#children + 1] = line("Alt+n new session  |  Alt+p preview selected stopped session")
     children[#children + 1] = line("Alt+y CONFIRM displayed transfer  |  Alt+v native test (two model requests)")
+    children[#children + 1] = line("Alt+e approves entered sharing order  |  Alt+i shared status")
     children[#children + 1] = line("Selected source: " .. (store.selected or "none"))
     local answer = (thurbox.runs or {})[state.request_key or "none"]
     local output = answer and (answer.state == "done" and
@@ -105,6 +126,22 @@ return {
     elseif action == "accounts.login" then launch_login()
     elseif action == "accounts.start" then
       ask({ "start", value("profile"), "--repo", value("repo"), "--name", value("session_name") })
+    elseif action == "accounts.switch" then
+      local next = next_account()
+      if next then
+        ask({ "switch", "--session", store.selected or "", "--expected-profile", next })
+      else
+        command("message", { text = "Select an enabled shared session and wait for its next account to appear.", level = "error" })
+      end
+    elseif action == "accounts.shared_status" then
+      ask({ "shared-status", "--session", store.selected or "" })
+    elseif action == "accounts.enable_shared" then
+      local args = { "enable-shared", "--session", store.selected or "", "--consent" }
+      for profile in value("sharing_order"):gmatch("[^,]+") do
+        args[#args + 1] = "--profile"
+        args[#args + 1] = profile:match("^%s*(.-)%s*$")
+      end
+      ask(args)
     elseif action == "accounts.preview" then
       state.source = store.selected
       state.target = value("profile")
@@ -116,11 +153,11 @@ return {
       local output = answer and answer.stdout or ""
       local source = output:match('"source"%s*:%s*"([^"\n]+)"')
       local target = output:match('"target"%s*:%s*"([^"\n]+)"')
-      if view_height >= 26 and plan and source == state.source and target == state.target and
+      if view_height >= 30 and plan and source == state.source and target == state.target and
         state.source == store.selected and state.target == value("profile") then
         ask({ "handoff", "--confirm", plan })
       else
-        command("message", { text = "Preview this source and target first. Use a 26-row pane or CLI to review and confirm all details.", level = "error" })
+        command("message", { text = "Preview this source and target first. Use a 30-row pane or CLI to review and confirm all details.", level = "error" })
       end
     elseif action == "accounts.verify" then ask({ "verify-handoff", value("profile") })
     else return false end

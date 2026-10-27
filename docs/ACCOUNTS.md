@@ -1,3 +1,10 @@
+# Shared one-click switching
+
+For sequential account use with one local conversation, follow the
+[README setup and switching guide](../README.md#one-time-account-setup).
+The handoff commands below are the older explicit snapshot/fork workflow.
+They remain available but are not used by shared switching.
+
 # Claude Enterprise accounts
 
 Each named profile has its own private `CLAUDE_CONFIG_DIR`. Credentials stay in
@@ -33,13 +40,13 @@ thurbox-accounts ui-install
 
 Press **Alt+F7** to open/leave Accounts. In **Ctrl+, → ]**, select Accounts and
 grant its **run/program** capabilities yourself. Installation never grants them.
-Tab moves between profile, repository and new-session name fields. Alt+r lists
+Tab moves between profile, repository, new-session name and sharing-order fields. Alt+r lists
 profiles; type the selected profile's name in the first field.
 
 - **Alt+a** adds a profile; **Alt+l** opens SSO inside the pane; **Alt+b** returns.
 - **Alt+s** checks identity; **Alt+n** starts a session under that profile.
 - **Alt+p** previews handoff of the selected session to the entered profile.
-- **Alt+y** confirms the displayed transfer. Read its identities and directory first. Use a pane at least 26 rows high for
+- **Alt+y** confirms the displayed transfer. Read its identities and directory first. Use a pane at least 30 rows high for
 confirmation, or review and confirm through the CLI.
 - **Alt+v** verifies native handoff with two small synthetic model requests.
 

@@ -49,3 +49,29 @@ passed with both an empty custom interface and the default interface path in
 isolated configurations. Latest fixture: `/private/tmp/tbx-install-default-ui-4pmkmpy_`.
 Independent review found no blockers; relative CLI/account paths are normalized
 before invoking the installed launcher. Authentication behavior is unchanged.
+
+## Shared sequential switching — v0.2.0
+
+42 unit/distribution/installer tests pass, including a full synthetic subprocess
+run of the guarded native verification protocol. New regressions cover selected-only
+shared aliases and sidecars, proof/consent gates, replaced canonical parents,
+active tool/permission/subagent refusal, stale destinations, transition contention,
+reservation recovery, optional-focus failure and orphan-PID preservation. Compile
+checks and diff whitespace checks pass. No new dependencies.
+
+Real Thurbox 2.75.2/tmux synthetic A→B→A smoke passed with the same native UUID,
+canonical transcript, separate profile environments, guarded quota shutdown and
+stale managed writer rejection. Artifact:
+`/private/tmp/tbx-shared-smoke-z8nsbikj/summary.json`.
+The fixture uses a synthetic Claude executable and synthetic hook events; it
+does not prove native Enterprise authentication or actual quota detection.
+
+No real account profiles are configured locally. Native `verify-shared` and
+authenticated cross-account compaction/sidecar behavior remain unverified here.
+The production proof gate remains closed until users log in and that command
+passes against their exact native build and selected account identities.
+
+The 0.2.0 live installer and repeat install pass. Native Thurbox hook-only registry
+patches are accepted without rewriting user settings; custom patches still refuse.
+Live plugin check reports zero warnings and dropped pills. Legacy handoff smoke
+also passed: `/private/tmp/tbx-account-smoke-g9yjjol2/summary.json`.

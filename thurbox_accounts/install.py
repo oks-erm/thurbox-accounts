@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import sys
 
+from .agent_install import register
 from .runtime import execute
 from .thurbox import Thurbox, strict_json
 
@@ -21,7 +22,7 @@ def install_checkout(command, accounts_dir, claude, bin_dir, *, source=None):
         raise ValueError('Run install from the cloned checkout: ./bin/thurbox-accounts install')
     stage = 'Install runtime files'
     try:
-        print('[1/3] Install runtime files from local checkout…', file=sys.stderr, flush=True)
+        print('[1/4] Install runtime files from local checkout…', file=sys.stderr, flush=True)
         thurbox = Thurbox([executable])
         report = thurbox.call('extension', 'install', str(source))
         home = Path(report.get('home', ''))
@@ -30,7 +31,7 @@ def install_checkout(command, accounts_dir, claude, bin_dir, *, source=None):
             raise ValueError('Thurbox did not return a usable installed launcher')
 
         stage = 'Prepare and validate Accounts pane'
-        print('[2/3] Prepare and validate Accounts pane…', file=sys.stderr, flush=True)
+        print('[2/4] Prepare and validate Accounts pane…', file=sys.stderr, flush=True)
         directory = Path(thurbox.call('plugin', 'dir')['dir'])
         if not directory.is_absolute():
             raise ValueError('Thurbox returned a non-absolute interface directory')
@@ -47,8 +48,12 @@ def install_checkout(command, accounts_dir, claude, bin_dir, *, source=None):
         if pane.get('checked', {}).get('ok') is not True:
             raise ValueError('Accounts pane did not pass plugin check')
 
+        stage = 'Register guarded account agent'
+        print('[3/4] Register guarded account agent…', file=sys.stderr, flush=True)
+        agent = register(thurbox,home / 'bin/thurbox-accounts-agent')
+
         stage = 'Link account command'
-        print('[3/3] Link account command…', file=sys.stderr, flush=True)
+        print('[4/4] Link account command…', file=sys.stderr, flush=True)
         bin_dir = bin_dir.expanduser().absolute()
         bin_dir.mkdir(parents=True, exist_ok=True)
         link = bin_dir / 'thurbox-accounts'
@@ -59,6 +64,6 @@ def install_checkout(command, accounts_dir, claude, bin_dir, *, source=None):
         else:
             link.symlink_to(launcher)
         return dict(installed='thurbox-accounts', launcher=str(launcher), command=str(link),
-                    pane=pane, next='Installation complete. Open Thurbox and press Alt+F7. Grant Accounts capabilities yourself.')
+                    pane=pane, agent=agent, next='Installation complete. Open Thurbox and press Alt+F7. Grant Accounts capabilities yourself.')
     except (OSError, ValueError, RuntimeError, TimeoutError) as error:
         raise RuntimeError(f'{stage} failed: {error}') from error

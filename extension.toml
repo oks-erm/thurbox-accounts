@@ -1,7 +1,7 @@
 name = "thurbox-accounts"
-description = "Standalone Claude Enterprise account profiles and confirmed conversation handoff"
+description = "Isolated Claude Enterprise logins and one-click shared conversation switching"
 config_version = 1
-version = "0.1.1"
+version = "0.2.0"
 
 [[files]]
 path = "bin/thurbox-accounts"
@@ -45,3 +45,19 @@ path = "docs/VALIDATION.md"
 
 [[files]]
 path = "thurbox_accounts/install.py"
+
+[[files]]
+path = "bin/thurbox-accounts-agent"
+executable = true
+
+[[files]]
+path = "thurbox_accounts/shared.py"
+
+[[files]]
+path = "thurbox_accounts/guard.py"
+
+[[files]]
+path = "thurbox_accounts/shared_probe.py"
+
+[[files]]
+path = "thurbox_accounts/agent_install.py"
