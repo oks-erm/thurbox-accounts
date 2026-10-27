@@ -76,3 +76,27 @@ free: an orphan may survive. Preserve replaced aliases for manual recovery.
 `examples/shared_smoke.py` exercises real tmux A→B→A with synthetic Claude and no
 API calls. Run it after shared transport/supervisor changes, then unit/compile
 checks, live plugin check and installer rerun. No CI workflow or deployment exists.
+
+## Mac desktop companion (0.3.0)
+
+`desktop.py` is a narrow owned-session adapter. `desktop/Accounts.swift` provides
+a dependency-free SwiftUI/AppKit window (macOS 13+). `desktop_install.py` builds
+and ad-hoc signs an owned app bundle under ~/Applications, keeping update backups.
+`thurbox-accounts desktop-install` requires the checkout or installed extension
+payload and Apple command-line tools; a bare Python wheel lacks the Swift source.
+App/backend configuration contains executable paths only. Never import browser
+cookies, login databases or native credential files. Native SSO uses a private
+Terminal command file; model requests require Send or confirmed verification.
+
+Refresh must stay read-only and off the UI thread. Drafts are per conversation.
+Reject enrolled originals and stale/foreign sessions on every input/resume path.
+Hold transition-UUID across resume preflights; use Shared._launch reservation for
+shared resume. Do not introduce an alternate authentication or writer policy.
+The hidden --desktop-deadline cooperatively raises through runtime.execute to
+clean its subprocess group before returning; uncertain outer shutdown disables
+UI mutations. Unknown send receipts must not become a silent success or retry.
+
+Validation: full Python suite/compile, desktop-install fresh/rerun/collision tests,
+`examples/shared_smoke.py --desktop`, codesign --verify --deep --strict, compiled
+app `--bridge-check` and `--ui-model-check`, then native window inspection.
+Do not certify real SSO or native quota portability from synthetic fixtures.

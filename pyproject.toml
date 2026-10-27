@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thurbox-accounts"
-version = "0.2.0"
+version = "0.3.0"
 description = "Standalone Claude Enterprise account switching for Thurbox"
 requires-python = ">=3.11"
 dependencies = []

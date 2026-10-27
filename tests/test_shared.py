@@ -177,3 +177,12 @@ class SharedTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'progress'):
                 self.shared.switch(self.uuid)
         self.assertFalse(self.store.read('control-' + self.uuid + '.json'))
+
+    def test_completed_aliases_recover_after_enrollment_controller_crash(self):
+        self.proof()
+        record = self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record['phase'] = 'enrolling'
+        self.shared.save(record)
+        with patch.object(self.shared,'_launch',return_value={'recovered':True}) as launch:
+            self.assertEqual(self.shared.recover(self.uuid),{'recovered':True})
+        self.assertEqual(launch.call_args.args[1],0)

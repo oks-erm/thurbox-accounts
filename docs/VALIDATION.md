@@ -75,3 +75,26 @@ The 0.2.0 live installer and repeat install pass. Native Thurbox hook-only regis
 patches are accepted without rewriting user settings; custom patches still refuse.
 Live plugin check reports zero warnings and dropped pills. Legacy handoff smoke
 also passed: `/private/tmp/tbx-account-smoke-g9yjjol2/summary.json`.
+
+## Desktop companion — v0.3.0
+
+55 Python tests pass. New coverage checks owned-only listing, enrolled-original
+refusal, native foreground validation, literal input, transition-locked resume,
+unconfirmed receipts without retries, cooperative deadline child cleanup, app
+ownership/collision protection and interrupted enrollment recovery.
+
+The SwiftUI/AppKit app compiles for macOS 13 on Apple Silicon and is locally
+ad-hoc signed; `codesign --verify --deep --strict` passes. The installed app's
+`--bridge-check` returns the expected empty real-profile snapshot;
+`--ui-model-check` confirms draft isolation. Native window inspection confirms
+the account/setup controls and empty state render. No capabilities were granted.
+
+Real tmux synthetic smoke with `--desktop` passes listing/capture, guarded
+Stop/Resume, literal prompt delivery, A→B→A and enrolled-original/stale-owner
+refusals. Artifacts: `/private/tmp/tbx-shared-smoke-x_c7jina/summary.json`.
+Synthetic console submission can be unconfirmed; the adapter displays that
+receipt without retrying or claiming confirmed submission.
+
+Installed: `~/Applications/Thurbox Accounts.app`, backed by the installed extension.
+SSO and actual native cross-Enterprise behavior remain unverified: no real
+profiles are configured. The native proof gate remains closed.

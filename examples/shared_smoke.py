@@ -12,6 +12,7 @@ import uuid
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--desktop',action='store_true',help='Also exercise desktop listing/capture/literal send')
     parser.add_argument('--thurbox-cli',default='thurbox-cli')
     args = parser.parse_args()
     binary = shutil.which(args.thurbox_cli)
@@ -48,7 +49,14 @@ if '--settings' in args and os.environ.get('THURBOX_ACCOUNTS_CONVERSATION'):
                 if '--event' in hook.get('command',''):
                     subprocess.run(hook['command'],shell=True,input=json.dumps(payload),text=True,check=True)
 print('SYNTHETIC READY',flush=True)
-time.sleep(600)
+while True:
+    line=sys.stdin.readline()
+    if not line:
+        time.sleep(0.1)
+        continue
+    with path.open('a') as stream:
+        stream.write(json.dumps(dict(type='user',sessionId=identifier,message=dict(role='user',content=line)))+'\\n')
+    print('SYNTHETIC INPUT RECEIVED',flush=True)
 ''')
     native.chmod(0o700)
     (config/'agents.toml').write_text('config_version=1\ndefault="claude"\n[[agents]]\nname="claude"\ncommand=' + json.dumps(str(native)) + '\nnew_session_args=["--session-id","{id}"]\nresume_args=["--resume","{id}"]\nhook_schema="claude"\n')
@@ -98,6 +106,24 @@ time.sleep(600)
         shared.validate(record)
         text = Path(record['transcript']).read_text()
         assert 'SYNTHETIC-enterprise-a' in text and 'SYNTHETIC-enterprise-b' in text
+        if args.desktop:
+            from thurbox_accounts.desktop import Desktop
+            desktop = Desktop(service)
+            snapshot = desktop.state()
+            assert [row['id'] for row in snapshot['conversations']] == [current['session']]
+            assert 'SYNTHETIC READY' in desktop.capture(current['session'])['output']
+            desktop.stop(current['session'])
+            desktop.start(current['session'])
+            wait(lambda: shared._runtime(conversation).get('turn') == 'quota')
+            desktop.send(current['session'],'--DESKTOP-LITERAL-PROOF')
+            wait(lambda: '--DESKTOP-LITERAL-PROOF' in Path(record['transcript']).read_text())
+            text = Path(record['transcript']).read_text()
+            try:
+                desktop.start(source['id'])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('Desktop restarted unguarded enrolled original')
         # A stale managed row cannot retake the writer or clobber its runtime.
         old = sessions[1]
         tb.call('session','start',old)
@@ -106,7 +132,7 @@ time.sleep(600)
         assert Path(record['transcript']).read_text() == text
         summary = dict(real_thurbox=True,synthetic_claude=True,native_enterprise_auth_verified=False,
             same_conversation_uuid=True,canonical_history=True,separate_profile_env=True,
-            sequential_a_b_a=True,stale_writer_rejected=True,artifacts=str(root))
+            sequential_a_b_a=True,stale_writer_rejected=True,desktop_adapter_verified=args.desktop,artifacts=str(root))
         atomic_write(root/'summary.json',dumps(summary))
         print(dumps(summary))
     finally:

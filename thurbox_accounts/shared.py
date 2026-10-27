@@ -245,7 +245,7 @@ class Shared:
     def recover(self, conversation):
         with self.store.lock('transition-' + identifier(conversation)):
             record = self.load(conversation)
-            if record['phase'] not in {'failed','switching'}:
+            if record['phase'] not in {'failed','switching'} and (record['allowed_session'] or record['phase'] not in {'enrolling','stopped'}):
                 raise ValueError('No failed managed session to recover; inspect shared status')
             if not record['allowed_session']:
                 # Enrollment can finish its aliases then fail before reservation.

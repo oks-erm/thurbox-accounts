@@ -46,6 +46,49 @@ cloning. The installer above uses `extension install /local/checkout`, which
 works on that version. `plugin install` is a separate command and does not install
 this extension.
 
+## Mac desktop companion
+
+For a native window with account setup, conversation output, replies and a named
+**Switch to account** button, run this after installing the extension:
+
+```sh
+thurbox-accounts desktop-install
+open "$HOME/Applications/Thurbox Accounts.app"
+```
+
+Requires macOS 13+ and Apple's Swift command-line tools. If needed, install them
+with `xcode-select --install`, then rerun `desktop-install`. The app is compiled
+locally with no third-party UI packages. An unrelated app at that path is preserved;
+updates to this app keep a timestamped backup.
+
+Inside the app:
+
+1. Add an account name, click **Log in…** and complete native SSO in Terminal and
+   your browser. Repeat for the other account; **Check login** confirms identity.
+2. Select an account and click **New conversation…** to choose your project.
+   Read the native console and answer its prompts yourself. **Send** submits a
+   request; Enter/Esc/arrow buttons handle native menus and confirmations.
+3. Expand **Set up shared history**, enter the account names in switching order,
+   and click **Verify accounts…**. Its confirmation explains synthetic model usage.
+4. Stop the conversation at a safe point, then **Enable for selected conversation…**.
+   Confirm exactly which accounts can use its context. Later, click **Switch to…**
+   when the current account reaches its limit.
+
+The Thurbox TUI does not need to be open. The companion uses its local background
+runtime and the same guarded sessions, history, native proof and recovery checks.
+Drafts stay with their conversation. Refreshing never sends a model request.
+If submission cannot be confirmed, the app shows that uncertainty: inspect the
+native console before retrying or pressing Enter.
+
+This is a companion window for Claude Code, not an injected modification to the
+Claude Desktop app. It displays the most recent 300 native console lines rather
+than a full terminal emulator. Advanced terminal editing remains available in
+Thurbox. Browser/SSO login remains native; no credentials are copied.
+
+To update: rerun the extension installer, then `thurbox-accounts desktop-install`.
+Close and reopen the companion after updating. The native app pins the backend
+paths from its build, so rerun that command if Python/Claude/Thurbox paths change.
+
 ## One-time account setup
 
 ```sh
@@ -128,7 +171,7 @@ workflow extension.
 python3.11 -m unittest discover -s tests -q
 python3.11 -m compileall -q thurbox_accounts tests examples
 python3.11 examples/live_smoke.py --thurbox-cli /path/to/thurbox-cli
-python3.11 examples/shared_smoke.py --thurbox-cli /path/to/thurbox-cli
+python3.11 examples/shared_smoke.py --desktop --thurbox-cli /path/to/thurbox-cli
 ```
 
 The live smoke uses real Thurbox/tmux with synthetic accounts, without LLM calls.

@@ -24,7 +24,9 @@ class Thurbox:
         self.timeout = timeout
 
     def call(self, *args: str, timeout: float | None = None) -> dict:
-        result = execute([*self.command, *args, "--json"], Path.cwd(), timeout=timeout or self.timeout,
+        argv = list(args)
+        argv.insert(argv.index('--') if '--' in argv else len(argv),'--json')
+        result = execute([*self.command, *argv], Path.cwd(), timeout=timeout or self.timeout,
                          limit=2_000_000)
         if result["status"] == "TIMEOUT":
             raise TimeoutError(f"Thurbox {' '.join(args[:2])} exceeded its deadline")
@@ -39,6 +41,8 @@ class Thurbox:
             raise RuntimeError(f"Thurbox {' '.join(args[:2])} failed ({result['status']}): "
                                f"{detail[:1000] or 'no diagnostic returned'}")
         value = strict_json(result["stdout"])
+        if args[:2] == ('session','list') and isinstance(value,list) and all(isinstance(row,dict) for row in value):
+            value = dict(sessions=value)
         if not isinstance(value, dict) or value.get("ok") is False:
             raise ValueError("Thurbox returned invalid or unsuccessful JSON")
         return value

@@ -1,5 +1,8 @@
 """Standalone account-switching command line."""
 import argparse
+import contextlib
+import math
+import signal
 import sys
 from pathlib import Path
 from .accounts import Profiles, Claude, Accounts
@@ -11,6 +14,7 @@ def parser():
     parser.add_argument('--accounts-dir', type=Path, default=Path.home() / '.local/share/thurbox-loop/accounts')
     parser.add_argument('--claude', default='claude')
     parser.add_argument('--thurbox-cli', default='thurbox-cli')
+    parser.add_argument('--desktop-deadline',type=float,help=argparse.SUPPRESS)
     commands = parser.add_subparsers(dest='account_action', required=True)
     for verb in ('add', 'login', 'status', 'start', 'verify-handoff'):
         command = commands.add_parser(verb)
@@ -21,6 +25,8 @@ def parser():
             command.add_argument('--repo', type=Path, required=True)
             command.add_argument('--name', dest='session_name', required=True)
     installer = commands.add_parser('install', help='Install this cloned checkout, command and Accounts pane')
+    desktop_install = commands.add_parser('desktop-install', help='Build/install the native macOS companion (requires Swift command-line tools)')
+    desktop_install.add_argument('--app-dir', type=Path, default=Path.home() / 'Applications')
     installer.add_argument('--bin-dir', type=Path, default=Path.home() / '.local/bin')
     verification = commands.add_parser('verify-shared', help='Native shared-history proof; synthetic model requests up to $0.25 each')
     verification.add_argument('profiles', nargs='+')
@@ -34,6 +40,12 @@ def parser():
         command.add_argument('--session')
         if action == 'switch':
             command.add_argument('--expected-profile')
+    commands.add_parser('desktop-state')
+    for action in ('desktop-capture','desktop-send','desktop-key','desktop-stop','desktop-start'):
+        command = commands.add_parser(action)
+        command.add_argument('session')
+        if action in {'desktop-send','desktop-key'}:
+            command.add_argument('value')
     commands.add_parser('list')
     handoff = commands.add_parser('handoff')
     handoff.add_argument('--session')
@@ -53,9 +65,20 @@ def run(args):
         from .install import install_checkout
         print(dumps(install_checkout(args.thurbox_cli, args.accounts_dir, args.claude, args.bin_dir)))
         return 0
+    if args.account_action == 'desktop-install':
+        from .desktop_install import install
+        print(dumps(install(args.app_dir,args.accounts_dir,args.claude,args.thurbox_cli)))
+        return 0
     profiles = Profiles(args.accounts_dir)
     service = Accounts(profiles, Claude(args.claude), Thurbox([args.thurbox_cli]))
     verb = args.account_action
+    if verb.startswith('desktop-'):
+        from .desktop import Desktop
+        desktop = Desktop(service)
+        action = verb.removeprefix('desktop-')
+        result = desktop.state() if action == 'state' else getattr(desktop,action)(args.session,*([args.value] if hasattr(args,'value') else []))
+        print(dumps(result))
+        return 0
     if verb in {'verify-shared','enable-shared','switch','shared-status','recover-shared'}:
         from .shared import Shared
         shared = Shared(service)
@@ -117,10 +140,33 @@ def run(args):
     return 0
 
 
+@contextlib.contextmanager
+def desktop_deadline(seconds):
+    if seconds is None:
+        yield
+        return
+    if not math.isfinite(seconds) or not 0 < seconds <= 3600:
+        raise ValueError('Desktop deadline must be between 0 and 3600 seconds')
+    def interrupt(signum, frame):
+        # Raising through runtime.execute runs its process-group cleanup before
+        # the desktop can accept another operation. Never retry a mutation here.
+        raise TimeoutError('Desktop operation deadline/cancellation reached; child cleanup completed. Inspect session state before retrying.')
+    old_alarm = signal.signal(signal.SIGALRM,interrupt)
+    old_term = signal.signal(signal.SIGTERM,interrupt)
+    previous = signal.setitimer(signal.ITIMER_REAL,seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL,*previous)
+        signal.signal(signal.SIGALRM,old_alarm)
+        signal.signal(signal.SIGTERM,old_term)
+
+
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        return run(args)
+        with desktop_deadline(args.desktop_deadline):
+            return run(args)
     except (OSError, ValueError, RuntimeError, TimeoutError) as error:
         print(redact(str(error)), file=sys.stderr)
         return 1
