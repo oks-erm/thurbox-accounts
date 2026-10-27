@@ -7,7 +7,7 @@ selected conversation with one shared local history. Includes the Accounts pane 
 
 ## Install
 
-Requires Python 3.11+, Thurbox 2.75.2+, local tmux and a Claude Code build
+Requires macOS or Linux (Windows: use WSL), Python 3.11+, Thurbox 2.75.2+, local tmux and a Claude Code build
 that passes `verify-shared` (the current local native build is 2.1.308).
 
 The repository is private: Git must have access through your GitHub login.
@@ -89,7 +89,19 @@ To update: rerun the extension installer, then `thurbox-accounts desktop-install
 Close and reopen the companion after updating. The native app pins the backend
 paths from its build, so rerun that command if Python/Claude/Thurbox paths change.
 
-## One-time account setup
+## Use the Accounts pane
+
+1. Press **F7**. Click **Open Settings** if the pane asks for its one-time permissions.
+2. Enter a friendly account name (for example Work A), click **Add account**, then **Log in to Work A**. Finish Claude’s browser/SSO login; **F7** returns to your accounts. Repeat for the other account.
+3. Click **Conversations → New conversation**, choose/paste your project folder, then **Create conversation**.
+4. To reuse its history with another account, select the conversation and click **Set up account switching**. Select accounts in switching order, **Check compatibility**, then **Enable switching**. Each step explains and confirms allowance use or organization access. Stop the conversation at a safe point before enabling.
+5. Later, select that conversation and click **Switch to ACCOUNT**.
+
+Click controls directly, or use **Tab** and **Enter**. No Alt shortcuts, internal session IDs or comma-separated account names are needed. If a confirmation does not fit, enlarge the pane before continuing.
+
+Install/update on the computer and terminal where Thurbox runs. Updating a Mac does not update a Windows/WSL copy.
+
+## CLI account setup
 
 ```sh
 thurbox-accounts add work-a
@@ -126,8 +138,7 @@ Use the new guarded session returned by the command; leave the original stopped.
 
 ## Switch when the account reaches its limit
 
-Open **F7**, select the current shared session and use **Alt+x Switch to
-ACCOUNT**. The pane shows the next account before switching. Switches cycle the
+Open **F7**, click **Conversations**, select the shared conversation and click **Switch to ACCOUNT**. The pane shows the next account before switching. Switches cycle the
 approved order, stop the source and resume the same conversation under the next
 account. There is **no per-switch fork, history copy or extra model request**;
 restored context is used when you next send a prompt.

@@ -70,3 +70,6 @@ path = "thurbox_accounts/desktop_install.py"
 
 [[files]]
 path = "desktop/Accounts.swift"
+
+[[files]]
+path = "thurbox_accounts/pane.py"

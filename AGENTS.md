@@ -100,3 +100,17 @@ Validation: full Python suite/compile, desktop-install fresh/rerun/collision tes
 `examples/shared_smoke.py --desktop`, codesign --verify --deep --strict, compiled
 app `--bridge-check` and `--ui-model-check`, then native window inspection.
 Do not certify real SSO or native quota portability from synthetic fixtures.
+
+## Guided pane
+
+`pane.py` supplies a percent-encoded read model and friendly receipts; mutations
+reuse CLI/Accounts/Shared policy. Refresh must never authenticate or send requests.
+Friendly names derive internal IDs; preserve explicit labels and unique names.
+Lua controls support clicks and Tab/Enter, with F7 returning from native login.
+Sharing confirmation freezes source/account order and is disabled unless all
+consent text fits. Keep new-conversation form separate from the session list.
+`examples/guided_pane_smoke.py` exercises the real isolated Lua VM/TUI with
+stubbed operations, no trusted capabilities, logins or model requests.
+Thurbox 2.75.2 emits a generic raw-on_click catalog warning even when semantic
+commands exist; do not remove mouse support just to hide that warning.
+Windows use requires WSL; native PowerShell is not supported.

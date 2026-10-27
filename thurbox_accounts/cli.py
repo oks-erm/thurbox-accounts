@@ -1,6 +1,7 @@
 """Standalone account-switching command line."""
 import argparse
 import contextlib
+import io
 import math
 import signal
 import sys
@@ -40,6 +41,11 @@ def parser():
         command.add_argument('--session')
         if action == 'switch':
             command.add_argument('--expected-profile')
+    commands.add_parser('pane-state')
+    pane_add = commands.add_parser('pane-add')
+    pane_add.add_argument('label')
+    pane_run = commands.add_parser('pane-run')
+    pane_run.add_argument('operation',nargs=argparse.REMAINDER)
     commands.add_parser('desktop-state')
     for action in ('desktop-capture','desktop-send','desktop-key','desktop-stop','desktop-start'):
         command = commands.add_parser(action)
@@ -72,6 +78,24 @@ def run(args):
     profiles = Profiles(args.accounts_dir)
     service = Accounts(profiles, Claude(args.claude), Thurbox([args.thurbox_cli]))
     verb = args.account_action
+    if verb in {'pane-state','pane-add','pane-run'}:
+        from .pane import OPERATIONS, add, receipt, snapshot
+        if verb == 'pane-state':
+            print(snapshot(service))
+        elif verb == 'pane-add':
+            print(dumps(add(profiles,args.label)))
+        else:
+            operation = args.operation
+            if not operation or operation[0] not in OPERATIONS:
+                raise ValueError('Unsupported Accounts pane operation')
+            prefix = ['--accounts-dir',str(profiles.root),'--claude',args.claude,'--thurbox-cli',args.thurbox_cli]
+            target = parser().parse_args([*prefix,*operation])
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                run(target)
+            from .thurbox import strict_json
+            print(receipt(operation[0],strict_json(output.getvalue())))
+        return 0
     if verb.startswith('desktop-'):
         from .desktop import Desktop
         desktop = Desktop(service)
@@ -134,7 +158,7 @@ def run(args):
         result = install(args.thurbox_cli, profiles.root, args.claude)
     if args.text and verb == 'list':
         print('\n'.join(profile['name'] + ' — ' + profile['label'] + ' — ' +
-              profile.get('identity', {}).get('email', 'login required') for profile in result['profiles']) or 'No profiles. Add one with Alt+a or thurbox-accounts add NAME.')
+              profile.get('identity', {}).get('email', 'login required') for profile in result['profiles']) or 'No profiles. Click Add account in Accounts or run thurbox-accounts add NAME.')
     else:
         print(dumps(result))
     return 0

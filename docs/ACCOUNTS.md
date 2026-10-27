@@ -40,15 +40,15 @@ thurbox-accounts ui-install
 
 Press **F7** to open/leave Accounts. In **Ctrl+, → ]**, select Accounts and
 grant its **run/program** capabilities yourself. Installation never grants them.
-Tab moves between profile, repository, new-session name and sharing-order fields. Alt+r lists
-profiles; type the selected profile's name in the first field.
+Click **Add account**, give it a friendly name, then **Log in**. Complete native
+SSO and press **F7** to return. Repeat for each account. Open **Conversations**
+to create/open conversations or select **Set up account switching**. Select
+accounts in switching order; **Check compatibility** and **Enable switching**
+each show an explicit confirmation. Later use the named **Switch to** button.
+Use clicks, or Tab/Enter. No profile IDs or Alt shortcuts are required.
+Enlarge the pane if the sharing confirmation cannot fit.
 
-- **Alt+a** adds a profile; **Alt+l** opens SSO inside the pane; **Alt+b** returns.
-- **Alt+s** checks identity; **Alt+n** starts a session under that profile.
-- **Alt+p** previews handoff of the selected session to the entered profile.
-- **Alt+y** confirms the displayed transfer. Read its identities and directory first. Use a pane at least 30 rows high for
-confirmation, or review and confirm through the CLI.
-- **Alt+v** verifies native handoff with two small synthetic model requests.
+Windows users must run the extension and Thurbox in the same WSL environment.
 
 The pane shares the existing center slot. It preserves the layout and shared
 libraries. A replaced starter/previous generated pane is backed up beside it;
