@@ -131,3 +131,14 @@ launches display the last confirmed account. Legacy records remain manual.
 mutations, maps old originals to their current managed owner, and explains
 unsupported agents. Keep login/new-work selection distinct from active account.
 Validate `examples/shared_smoke.py --mode --desktop` plus the real Lua smoke.
+
+Revalidate the complete frozen mode source under the transition lock immediately
+before tracked history moves. Revalidate prepared canonical content and original
+stopped metadata after slow launch checks and recovery listing, before reservation.
+Explicit pane selection expires when store.selected changes; unresolved current
+owners must not fall back to unrelated conversations.
+Track asynchronous Bash jobs past PostToolUse. Only exact structured task completion
+or the main native Stop registry snapshot can discharge them; missing/unknown
+completion remains a blocker for switching and recovery. Never clear this evidence
+because the parent stopped or the account hit quota. The optional Stop task registry
+is documented at https://code.claude.com/docs/en/hooks#stop-input .

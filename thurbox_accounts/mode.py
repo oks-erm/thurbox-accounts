@@ -47,10 +47,10 @@ def read_file(path):
                         mtime=after.st_mtime_ns,sha256=hashlib.sha256(content).hexdigest())
 
 
-def manifest(path):
+def manifest(path, *, sidecars=None):
     _, main = read_file(path)
     result = {'main':main}; total = main['size']
-    sidecars = path.with_suffix('')
+    sidecars = sidecars if sidecars is not None else path.with_suffix('')
     if sidecars.exists() or sidecars.is_symlink():
         checked(sidecars,directory=True)
         pending = [sidecars]
@@ -111,9 +111,34 @@ class Mode:
                 or path != path.resolve()):
             raise ValueError('Source transcript does not belong to the verified native account directory')
         checked(path.parent,directory=True)
-        return dict(session=row['id'],conversation=native,cwd=row['cwd'],name=row.get('name',row['id']),
+        value = dict(session=row['id'],conversation=native,cwd=row['cwd'],name=row.get('name',row['id']),
                     source_profile=matches[0]['name'],source_identity=identity,directory=str(directory),
                     transcript=str(path),manifest=manifest(path))
+        self._row_unchanged(value)
+        return value
+
+    def _row_unchanged(self, plan):
+        row = self.tb.call('session','get',plan['session'])
+        expected = dict(id=plan['session'],agent='claude',agent_session_id=plan['conversation'],
+                        cwd=plan['cwd'],transcript_path=plan['transcript'],stopped=True)
+        if (any(row.get(k) != v for k,v in expected.items()) or row.get('host')
+                or row.get('backend_type') not in {None,'tmux','local:tmux'}
+                or row.get('background_work') or row.get('active_tools') or row.get('subagents') or row.get('blocked')):
+            raise ValueError('Source changed or restarted; stop it safely and review switching setup again')
+
+    def validate_prepared(self, record):
+        plan = record['source_snapshot']
+        if record.get('adopted'):
+            if manifest(Path(plan['transcript'])) != plan['manifest']:
+                raise ValueError('Original history changed before managed launch; history preserved')
+        observed = manifest(Path(record['transcript']),sidecars=Path(record['sidecars']))
+        def contents(items):
+            return {k:({'directory':True} if v.get('directory') else {'sha256':v['sha256'],'size':v['size']})
+                    for k,v in items.items()}
+        if contents(observed) != contents(plan['manifest']):
+            raise ValueError('Prepared history or sidecars changed; inspect preserved setup before recovery')
+        # No slow auth/launch calls may follow this final source check before reservation.
+        self._row_unchanged(plan)
 
     def preview(self, session, names):
         contract = self.shared.proof_contract(names)
@@ -147,7 +172,7 @@ class Mode:
                 if str(Path(self.store.get(binding['profile'])['directory'])) != plan['directory']:
                     raise ValueError('Owned source directory changed')
                 return self.shared.enroll(plan['session'],names,consent=True,mode=mode,name=name,
-                                          expected_digest=plan['manifest']['main']['sha256'])
+                                          expected_digest=plan['manifest']['main']['sha256'],mode_plan=plan)
             return self._adopt(plan,mode,name)
 
     def _adopt(self, plan, mode, name):

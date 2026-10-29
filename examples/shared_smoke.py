@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import subprocess
 import tempfile
 import time
 import uuid
@@ -110,6 +111,26 @@ while True:
             except ValueError as error: assert 'Off' in str(error)
             else: raise AssertionError('Disabled mode allowed a switch')
             mode.set_enabled(current['session'],True)
+            wait(lambda: shared._runtime(current['conversation']).get('turn')=='quota')
+            launch=tb.call('agent','launch-args','claude-accounts','--session',current['session'])
+            native_env=dict(os.environ); native_env.update(launch['env'])
+            def event(name, **payload):
+                payload.update(session_id=current['conversation'],hook_event_name=name)
+                result=subprocess.run([str(Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent'),'--event',name],
+                    env=native_env,input=json.dumps(payload),capture_output=True,text=True,timeout=15)
+                assert result.returncode==0, result.stderr
+            before=shared._runtime(current['conversation'])['native_pid']
+            event('PreToolUse',tool_use_id='synthetic-bg',tool_name='Bash',tool_input={'run_in_background':True})
+            event('PostToolUse',tool_use_id='synthetic-bg',tool_name='Bash',tool_response={'backgroundTaskId':'synthetic-task'})
+            event('StopFailure',error='rate_limit')
+            try: shared.switch(current['conversation'])
+            except ValueError as error: assert 'Background' in str(error)
+            else: raise AssertionError('Unconfirmed background work allowed a switch')
+            assert shared._runtime(current['conversation'])['native_pid']==before
+            os.kill(before,0)
+            assert not tb.call('session','get',current['session']).get('stopped')
+            event('Stop',background_tasks=[])
+            event('StopFailure',error='rate_limit')
         else:
             current = shared.enroll(source['id'],['enterprise-a','enterprise-b'],consent=True)
         conversation = current['conversation']
@@ -157,7 +178,8 @@ while True:
         summary = dict(real_thurbox=True,synthetic_claude=True,native_enterprise_auth_verified=False,
             same_conversation_uuid=True,canonical_history=True,separate_profile_env=True,
             sequential_a_b_a=True,stale_writer_rejected=True,desktop_adapter_verified=args.desktop,
-            ordinary_adoption_verified=args.mode,mode_off_on_verified=args.mode,artifacts=str(root))
+            ordinary_adoption_verified=args.mode,mode_off_on_verified=args.mode,
+            background_switch_refusal_verified=args.mode,artifacts=str(root))
         atomic_write(root/'summary.json',dumps(summary))
         print(dumps(summary))
     finally:

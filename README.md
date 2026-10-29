@@ -190,8 +190,10 @@ thurbox-accounts switch --session CURRENT_SHARED_SESSION_ID
 thurbox-accounts shared-status --session CURRENT_SHARED_SESSION_ID
 ```
 
-Switching refuses active tools/subagents, permission prompts, unknown state or
-unconfirmed shutdown. A native `StopFailure` with `rate_limit` permits the guarded
+Switching refuses active tools/subagents, unconfirmed background shell jobs, permission prompts, unknown state or
+unconfirmed shutdown. If native task completion cannot be verified, switching and
+recovery stay blocked; finish the task in native Claude and inspect its status
+before retrying. A native `StopFailure` with `rate_limit` permits the guarded
 stop. If Claude reports a different limit/error, stop the session yourself at a
 safe point, then switch. Crashed-supervisor evidence is preserved rather than
 starting another writer. Never start direct Claude processes against shared

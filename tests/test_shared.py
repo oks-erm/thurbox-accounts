@@ -186,3 +186,40 @@ class SharedTests(unittest.TestCase):
         with patch.object(self.shared,'_launch',return_value={'recovered':True}) as launch:
             self.assertEqual(self.shared.recover(self.uuid),{'recovered':True})
         self.assertEqual(launch.call_args.args[1],0)
+
+class BackgroundShellTests(unittest.TestCase):
+    def test_async_bash_is_not_safe_at_quota_until_matching_native_completion(self):
+        from thurbox_accounts.guard import apply_event, safe_state
+        state={}
+        apply_event(state,'PreToolUse',dict(tool_use_id='bash-1',tool_name='Bash',tool_input={'run_in_background':True}))
+        apply_event(state,'PostToolUse',dict(tool_use_id='bash-1',tool_name='Bash',tool_input={'run_in_background':True},tool_response={'backgroundTaskId':'task-1'}))
+        apply_event(state,'StopFailure',dict(error='rate_limit'))
+        self.assertFalse(safe_state(state),'A background shell still owns work after its launch tool returns')
+        apply_event(state,'PostToolUse',dict(tool_use_id='read',tool_name='TaskOutput',tool_input={'task_id':'other'},
+            tool_response={'retrieval_status':'success','task':{'task_id':'other','status':'completed'}}))
+        self.assertFalse(safe_state(state))
+        apply_event(state,'PostToolUse',dict(tool_use_id='read',tool_name='TaskOutput',tool_input={'task_id':'task-1'},
+            tool_response={'retrieval_status':'success','task':{'task_id':'task-1','status':'completed'}}))
+        self.assertTrue(safe_state(state))
+
+    def test_automatic_background_response_and_failed_background_launch_stay_unconfirmed(self):
+        from thurbox_accounts.guard import apply_event, safe_state
+        for event,response in [('PostToolUse',{'backgroundTaskId':'auto-task'}),('PostToolUseFailure',{})]:
+            with self.subTest(event=event):
+                state={}
+                apply_event(state,'PreToolUse',dict(tool_use_id='bash',tool_name='Bash',tool_input={'run_in_background':True}))
+                apply_event(state,event,dict(tool_use_id='bash',tool_name='Bash',tool_response=response))
+                apply_event(state,'StopFailure',dict(error='rate_limit'))
+                self.assertFalse(safe_state(state))
+
+    def test_native_stop_registry_can_confirm_completion_without_guessing_output_text(self):
+        from thurbox_accounts.guard import apply_event, safe_state
+        state={}
+        apply_event(state,'PreToolUse',dict(tool_use_id='bg',tool_name='Bash',tool_input={'run_in_background':True}))
+        apply_event(state,'PostToolUse',dict(tool_use_id='bg',tool_name='Bash'))
+        apply_event(state,'Stop',dict(background_tasks=[{'id':'live-shell','type':'shell','status':'running'}]))
+        apply_event(state,'StopFailure',dict(error='rate_limit'))
+        self.assertFalse(safe_state(state))
+        apply_event(state,'Stop',dict(background_tasks=[]))
+        apply_event(state,'StopFailure',dict(error='rate_limit'))
+        self.assertTrue(safe_state(state))

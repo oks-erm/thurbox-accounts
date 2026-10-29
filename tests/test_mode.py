@@ -180,3 +180,36 @@ class ModeTests(unittest.TestCase):
         with self.store.lock('transition-'+UUID):
             with self.assertRaisesRegex(ValueError,'progress'): self.mode().set_enabled('managed',False)
         self.assertTrue(Shared(self.accounts).load(UUID)['mode']['enabled'])
+
+    def test_owned_source_restart_and_sidecar_change_during_slow_checks_refuse_before_move(self):
+        import shutil
+        directory=Path(self.store.get('a')['directory'])
+        path=directory/'projects/-project'/(UUID+'.jsonl'); path.parent.mkdir(parents=True)
+        shutil.copyfile(self.path,path); path.with_suffix('').mkdir()
+        self.tb.directory=str(directory); self.tb.sessions['ordinary']['transcript_path']=str(path)
+        self.store.write('bindings.json',{'ordinary':dict(profile='a',identity=self.store.get('a')['identity'],cwd=str(self.root),agent_session_id=UUID)})
+        plan=self.mode().preview('ordinary',['a','b']); calls=0
+        def change(profile):
+            nonlocal calls
+            calls+=1
+            if calls==3:
+                self.tb.sessions['ordinary']['stopped']=False
+                (path.with_suffix('')/'unsafe').symlink_to(self.path)
+        with patch.object(self.accounts,'check_launch',side_effect=change), patch.object(Shared,'_launch') as launch:
+            with self.assertRaises(ValueError): self.mode().enable(plan['id'],consent=True)
+            launch.assert_not_called()
+        self.assertTrue(path.is_file()); self.assertFalse(path.is_symlink())
+        self.assertFalse((self.store.root/'shared'/UUID/'main.jsonl').exists())
+
+    def test_untracked_restart_during_final_launch_check_never_creates_managed_session(self):
+        plan=self.mode().preview('ordinary',['a','b'])
+        def change(profile):
+            record=self.store.read('shared-'+UUID+'.json')
+            if record.get('phase')=='stopped': self.tb.sessions['ordinary']['stopped']=False
+        def runtime(native):
+            record=self.store.read('shared-'+native+'.json')
+            return dict(owner=record.get('allowed_session'),phase='running') if record.get('allowed_session') else {}
+        with patch.object(self.accounts,'check_launch',side_effect=change), patch.object(Shared,'_runtime',side_effect=runtime):
+            with self.assertRaises(ValueError): self.mode().enable(plan['id'],consent=True)
+        self.assertFalse(any(c[:2]==('session','create') for c in self.tb.calls))
+        self.assertTrue(self.path.is_file()); self.assertFalse(self.path.is_symlink())

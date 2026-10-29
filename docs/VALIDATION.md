@@ -125,3 +125,21 @@ No real native authentication/model calls, WSL execution or Enterprise account
 portability were verified on the connected Mac. Native proof gates remain intact.
 The 2.75.2 live checker emits its generic raw-click catalog warning despite
 semantic actions; loading and layout validation still succeed. No auto grants.
+
+Independent review found source-preflight races and stale/unresolved selection.
+Failing regressions reproduced them; fixes now recheck full source before move
+and prepared source after slow launch checks, and fail closed on native selection
+changes/unresolved owners. Async Bash safety regressions also passed after retaining
+background task evidence until structured native completion. Unknown completion
+remains blocked. Real tmux rerun: `/private/tmp/tbx-shared-smoke-hcf6maak/summary.json`.
+Post-fix real TUI: `/private/tmp/tbx-guided-jpah6y6w` (including stale selection and
+unresolved-owner checks). Native hooks reference: [Stop input](https://code.claude.com/docs/en/hooks#stop-input).
+
+Final checks: 82 Python tests pass; compileall/diff check pass. Final synthetic
+tmux smoke also verifies background refusal through the actual native hook bridge:
+the existing native process remains alive while background completion is unknown,
+then A/B/A succeeds after a structured native Stop registry confirms completion.
+Artifacts: `/private/tmp/tbx-shared-smoke-xhgx742s/summary.json`.
+A real Claude CLI cold status probe against an empty private temporary config
+returned signed-out status and the expected config-directory schema; no login or
+model request was made. Actual Enterprise SSO and WSL execution remain unverified.

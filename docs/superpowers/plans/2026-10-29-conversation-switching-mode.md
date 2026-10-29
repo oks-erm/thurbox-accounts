@@ -70,3 +70,18 @@ Task 3 integration evidence: real Thurbox/tmux ordinary adoption + Off/On + A/B/
 Pre-review checks: full suite 77/77, compileall and diff check pass. Real UI
 Off/On/named switch and short-window checks passed at tbx-guided-6f27kzm4.
 No outstanding plan/interface conflicts. Final review and live delivery remain.
+
+Final review: three Important issues confirmed and fixed test-first in one pass:
+full tracked-source manifest/stopped recheck before moves; prepared-source final
+check after slow launch preflights; stale/unresolved Lua current-session selection
+fails closed. New regression tests reproduced all three before fixes.
+Also fixed pre-existing async Bash completion gap required by mode safety:
+PostToolUse does not discharge background work; structured completion/Stop registry
+can discharge known tasks. Unknown completion stays blocked. Native hook reference
+consulted; actual Enterprise auth/model requests remain untested.
+Consent wording now distinguishes untracked snapshots from tracked move/link history.
+No deferred review findings.
+
+Final fixes verified: 82/82 Python tests, compileall/diff check, real Lua selection
+regressions and tmux hook-bridge background refusal plus A/B/A all pass.
+No remaining review findings. Live installation, push and CI inspection pending.

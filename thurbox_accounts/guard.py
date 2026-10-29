@@ -65,6 +65,17 @@ def update(store, conversation, **fields):
 
 def apply_event(state, event, payload):
     tools, agents = set(state.get('tools', [])), set(state.get('subagents', []))
+    background = dict(state.get('background_tools',{}))
+    tool_input = payload.get('tool_input') or {}
+    response = payload.get('tool_response') or {}
+    if not isinstance(tool_input,dict):
+        raise ValueError('Native tool input must be an object; background completion is unconfirmed')
+    if event == 'Stop' and 'background_tasks' in payload:
+        tasks = payload['background_tasks']
+        if (not isinstance(tasks,list) or len(tasks)>1000
+                or any(not isinstance(t,dict) or not isinstance(t.get('id'),str) or not t['id'] for t in tasks)):
+            raise ValueError('Native background task registry is invalid; completion is unconfirmed')
+        background = {'native:'+t['id']:t['id'] for t in tasks}
     tool = payload.get('tool_use_id')
     agent = payload.get('agent_id')
     if event == 'UserPromptSubmit':
@@ -73,9 +84,23 @@ def apply_event(state, event, payload):
         if not isinstance(tool,str) or not tool:
             raise ValueError('Native tool hook has no stable tool id')
         tools.add(tool)
+        if payload.get('tool_name') == 'Bash' and tool_input.get('run_in_background') is True:
+            background[tool] = ''  # Launch is not completion of its background work.
         state['turn'] = 'working'
     elif event in {'PostToolUse','PostToolUseFailure'}:
         tools.discard(tool)
+        if payload.get('tool_name') == 'Bash':
+            task = response.get('backgroundTaskId') if isinstance(response,dict) else None
+            if isinstance(task,str) and task:
+                background[tool or task] = task
+        elif event == 'PostToolUse' and payload.get('tool_name') == 'TaskOutput' and isinstance(response,dict):
+            # Only an explicit native result for this exact task can discharge it.
+            task = response.get('task')
+            if (response.get('retrieval_status') == 'success' and isinstance(task,dict)
+                    and isinstance(task.get('task_id'),str) and bool(task['task_id'])
+                    and task.get('task_id') == tool_input.get('task_id')
+                    and task.get('status') in {'completed','failed','killed'}):
+                background = {key:value for key,value in background.items() if value != task.get('task_id')}
         state['blocked'] = False
     elif event == 'PermissionRequest':
         state['blocked'] = True
@@ -92,13 +117,13 @@ def apply_event(state, event, payload):
         state.update(turn='quota' if quota else 'idle',blocked=False,last_stop=time.time())
     counts = dict(state.get('events',{}))
     counts[event] = counts.get(event,0) + 1
-    state.update(tools=sorted(tools),subagents=sorted(agents),events=counts)
+    state.update(tools=sorted(tools),subagents=sorted(agents),background_tools=background,events=counts)
     return state
 
 
 def safe_state(state):
     return (state.get('turn') == 'quota' and not state.get('tools') and not state.get('subagents')
-            and not state.get('blocked') and not state.get('uncertain') and not state.get('error'))
+            and not state.get('background_tools') and not state.get('blocked') and not state.get('uncertain') and not state.get('error'))
 
 
 def hook(store, shared, conversation, owner, event):
@@ -186,13 +211,13 @@ def supervise(shared, record, owner, profile, native, args, launcher):
             prior = shared._runtime(conversation)
             if prior.get('native_pid') or prior.get('phase') in {'starting','running'}:
                 raise ValueError('Previous native shutdown is unconfirmed; inspect shared status before recovery')
-            if prior.get('tools') or prior.get('subagents') or prior.get('blocked') or prior.get('uncertain'):
+            if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('blocked') or prior.get('uncertain'):
                 raise ValueError('Previous worker activity or hook failure is unconfirmed')
             args, settings = guarded_settings(args,launcher)
             settings_path = Path(record['transcript']).parent / ('hooks-' + owner + '.json')
             atomic_write(settings_path,dumps(settings))
             update(store,conversation,owner=owner,phase='starting',native_pid=None,
-                   turn='unknown',tools=[],subagents=[],blocked=False,error=None,uncertain=False,request=None,stop_result=None)
+                   turn='unknown',tools=[],subagents=[],background_tools={},blocked=False,error=None,uncertain=False,request=None,stop_result=None)
             child = None
             try:
                 child = subprocess.Popen([native,*args,'--settings',str(settings_path)],

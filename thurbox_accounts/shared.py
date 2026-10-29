@@ -82,7 +82,7 @@ class Shared:
                 if not path.is_symlink() or path.resolve() != Path(record[key]):
                     raise ValueError('Shared history reference was replaced; preserved for manual recovery')
 
-    def enroll(self, source, names, *, consent=False, launch=True, mode=None, name=None, expected_digest=None):
+    def enroll(self, source, names, *, consent=False, launch=True, mode=None, name=None, expected_digest=None, mode_plan=None):
         if not consent:
             raise ValueError('Explicit consent is required to share this conversation with the selected accounts')
         proof = self.require_proof(names)
@@ -117,10 +117,14 @@ class Shared:
             canonical, sidecars = folder / 'main.jsonl', folder / 'session'
             if canonical.exists() or sidecars.exists():
                 raise ValueError('A previous enrollment needs recovery; history was preserved')
+            if mode_plan is not None:
+                from .mode import Mode
+                Mode(self.accounts)._unchanged(mode_plan)
             record = dict(conversation=conversation, project=path.parent.name, cwd=row['cwd'],
                 transcript=str(canonical), sidecars=str(sidecars), aliases=aliases, profiles=names,
                 proof=proof, index=names.index(binding['profile']), phase='enrolling',
                 allowed_session='', reservation='', original_session=row['id'], original_sha256=digest)
+            if mode_plan is not None: record['source_snapshot'] = mode_plan
             if mode is not None: record['mode'] = mode
             if name is not None: record['name'] = name
             self.save(record)  # Persist recovery paths before the first move.
@@ -153,9 +157,6 @@ class Shared:
         if record.get('mode',{}).get('enabled') is False and index != record['mode']['active_index']:
             raise ValueError('Account switching is Off; another account cannot be launched')
         self.validate(record)
-        if record.get('adopted') and not record.get('adoption_complete'):
-            from .mode import Mode
-            Mode(self.accounts)._unchanged(record['source_snapshot'])
         if record.get('is_probe'):
             raise ValueError('Synthetic proof histories cannot be enrolled as managed conversations')
         self.require_proof(record['profiles'])
@@ -164,10 +165,15 @@ class Shared:
         if not writer_available(self.store, record['conversation']):
             raise ValueError('A managed writer is still running; target was not launched')
         prior = self._runtime(record['conversation'])
-        if prior.get('tools') or prior.get('subagents') or prior.get('blocked') or prior.get('uncertain'):
+        if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('blocked') or prior.get('uncertain'):
             raise ValueError('Previous worker activity or hook failure is unconfirmed; target was not launched')
         if prior.get('native_pid') or prior.get('phase') in {'starting','running'}:
             raise ValueError('Previous native process has not confirmed shutdown; inspect shared status')
+        existing = self.tb.call('session','list') if recover else {}
+        rows = existing.get('sessions',[])
+        if record.get('source_snapshot') and not record.get('mode_setup_complete'):
+            from .mode import Mode
+            Mode(self.accounts).validate_prepared(record)
         owner = record['allowed_session'] if recover else str(uuid.uuid4())
         record.update(index=index, phase='switching', allowed_session=owner,
                       reservation=record['reservation'] if recover else uuid.uuid4().hex)
@@ -176,8 +182,6 @@ class Shared:
             target=target['name'], stage='launch', recovery=['thurbox-accounts','recover-shared',record['conversation']])
         self.store.write('switch-' + record['conversation'] + '.json', operation)
         try:
-            existing = self.tb.call('session','list') if recover else {}
-            rows = existing.get('sessions',[])
             if recover and any(row.get('id') == owner for row in rows):
                 self.tb.call('session','start',owner)
             else:
@@ -195,7 +199,7 @@ class Shared:
                 state = self._runtime(record['conversation'])
                 if state.get('owner') == owner and state.get('phase') == 'running':
                     record['phase'] = 'active'
-                    if record.get('adopted'): record['adoption_complete'] = True
+                    if record.get('source_snapshot'): record['mode_setup_complete'] = True
                     if 'mode' in record: record['mode']['active_index'] = index
                     self.save(record)
                     operation['stage'] = 'active'
@@ -240,9 +244,11 @@ class Shared:
                 if state.get('owner') != owner:
                     raise ValueError('Managed source ownership changed')
                 if state.get('request') == request and state.get('stop_result') == 'busy':
+                    if state.get('background_tools'):
+                        raise ValueError('Background shell/task completion is unconfirmed. Finish it in native Claude before switching; the source remains running')
                     raise ValueError('Source is working, awaiting permission, or has no proven usage-limit stop; it remains running')
                 if state.get('phase') == 'stopped' and not state.get('native_pid'):
-                    if state.get('tools') or state.get('subagents') or state.get('blocked'):
+                    if state.get('tools') or state.get('subagents') or state.get('background_tools') or state.get('blocked'):
                         raise ValueError('Stopped source still has unconfirmed tool/subagent activity; target was not launched')
                     break
                 if state.get('error'):

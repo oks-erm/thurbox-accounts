@@ -64,9 +64,11 @@ local function account(m)
   return m.accounts[1]
 end
 local function conversation(m)
-  if m.unsupported and not state.conversation then return nil end
-  for _, c in ipairs(m.conversations) do if c.id == state.conversation then return c end end
+  local explicit = state.selection_base == store.selected and state.conversation or nil
+  if m.unsupported and not explicit then return nil end
+  for _, c in ipairs(m.conversations) do if c.id == explicit then return c end end
   for _, c in ipairs(m.conversations) do if c.id == m.current or c.id == store.selected then return c end end
+  if m.current then return nil end
   return m.conversations[1]
 end
 local function label(m, name)
@@ -215,7 +217,7 @@ dispatch = function(id)
   elseif id == "more-accounts" then state.account_page = ((state.account_page or 0) + 1) % math.max(1, math.ceil(#m.accounts / 4))
   elseif id == "more-conversations" then state.conversation_page = ((state.conversation_page or 0) + 1) % math.max(1, math.ceil(#m.conversations / 4))
   elseif id:sub(1, 8) == "account:" then state.account = id:sub(9); state.added_label = nil
-  elseif id:sub(1, 13) == "conversation:" then state.conversation = id:sub(14)
+  elseif id:sub(1, 13) == "conversation:" then state.conversation = id:sub(14); state.selection_base = store.selected
   elseif id:sub(1, 6) == "share:" then
     local name, found, names = id:sub(7), false, {}
     for _, selected in ipairs(group(m)) do if selected == name then found = true else names[#names + 1] = selected end end
@@ -298,7 +300,7 @@ return {
           or (pending.kind == "enable" or pending.kind == "modeenable") and "These accounts and their organizations can use this conversation's context. Only this history and its sidecars are shared. Logins stay separate. This approval applies to later one-click switches."
           or "Stop only after tools and subagents finish. Conversation history is retained."
         if pending.kind == "modeenable" then
-          explanation = explanation .. " The stopped original is preserved; only this conversation is prepared. Off later prevents switches without erasing prior access."
+          explanation = explanation .. " An untracked original keeps its files; already account-managed history uses the existing move/link setup. Off later prevents switches without erasing prior access."
           if not pending.proof_ready then explanation = explanation .. " Compatibility check is required first; an exhausted account can block it." end
         end
         local node = line(explanation); add(node); rows = rows + node.len
