@@ -82,11 +82,13 @@ class Shared:
                 if not path.is_symlink() or path.resolve() != Path(record[key]):
                     raise ValueError('Shared history reference was replaced; preserved for manual recovery')
 
-    def enroll(self, source, names, *, consent=False, launch=True):
+    def enroll(self, source, names, *, consent=False, launch=True, mode=None, name=None, expected_digest=None):
         if not consent:
             raise ValueError('Explicit consent is required to share this conversation with the selected accounts')
         proof = self.require_proof(names)
         row, binding, path, digest = self.accounts.source(source)
+        if expected_digest and digest != expected_digest:
+            raise ValueError('Source changed after confirmation; review setup again')
         if binding['profile'] not in names:
             raise ValueError('Include the current account in the approved order')
         conversation = identifier(row['agent_session_id'])
@@ -119,6 +121,8 @@ class Shared:
                 transcript=str(canonical), sidecars=str(sidecars), aliases=aliases, profiles=names,
                 proof=proof, index=names.index(binding['profile']), phase='enrolling',
                 allowed_session='', reservation='', original_session=row['id'], original_sha256=digest)
+            if mode is not None: record['mode'] = mode
+            if name is not None: record['name'] = name
             self.save(record)  # Persist recovery paths before the first move.
             try:
                 os.rename(path, canonical)
@@ -146,7 +150,12 @@ class Shared:
 
     def _launch(self, record, index, *, recover=False):
         from .guard import writer_available
+        if record.get('mode',{}).get('enabled') is False and index != record['mode']['active_index']:
+            raise ValueError('Account switching is Off; another account cannot be launched')
         self.validate(record)
+        if record.get('adopted') and not record.get('adoption_complete'):
+            from .mode import Mode
+            Mode(self.accounts)._unchanged(record['source_snapshot'])
         if record.get('is_probe'):
             raise ValueError('Synthetic proof histories cannot be enrolled as managed conversations')
         self.require_proof(record['profiles'])
@@ -172,7 +181,7 @@ class Shared:
             if recover and any(row.get('id') == owner for row in rows):
                 self.tb.call('session','start',owner)
             else:
-                self.tb.call('session','create','--id',owner,'--name','shared-' + owner[:10],
+                self.tb.call('session','create','--id',owner,'--name',record.get('name','shared-' + owner[:10]),
                     '--repo-path',record['cwd'],'--agent',AGENT,'--multiplexer','tmux',
                     '--resume',record['conversation'],'--on-existing','fail',
                     '--env','CLAUDE_CONFIG_DIR=' + target['directory'],
@@ -186,6 +195,8 @@ class Shared:
                 state = self._runtime(record['conversation'])
                 if state.get('owner') == owner and state.get('phase') == 'running':
                     record['phase'] = 'active'
+                    if record.get('adopted'): record['adoption_complete'] = True
+                    if 'mode' in record: record['mode']['active_index'] = index
                     self.save(record)
                     operation['stage'] = 'active'
                     self.store.write('switch-' + record['conversation'] + '.json', operation)
@@ -209,6 +220,8 @@ class Shared:
         conversation = identifier(conversation)
         with self.store.lock('transition-' + conversation):
             record = self.load(conversation)
+            if record.get('mode',{}).get('enabled') is False:
+                raise ValueError('Account switching is Off; enable it for this conversation first')
             if record['phase'] != 'active':
                 raise ValueError('Shared conversation needs recovery; use recover-shared ' + conversation)
             self.validate(record)
