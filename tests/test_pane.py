@@ -53,3 +53,38 @@ class PaneTests(unittest.TestCase):
         self.assertIn('Log in',output.getvalue())
         self.assertEqual(self.store.get('work-a')['label'],'Work A')
         self.assertNotIn('"directory"',output.getvalue())
+
+    def test_current_untracked_session_is_visible_without_auth_or_binding(self):
+        from thurbox_accounts.pane import snapshot
+        row=dict(id='existing',name='Existing project',agent='claude',host=None,backend_type='tmux',
+                 cwd='/project',stopped=False,agent_session_id='88888888-8888-4888-8888-888888888888')
+        def call(*args):
+            return {'sessions':[row]} if args[:2]==('session','list') else row
+        with patch.object(self.service.thurbox,'call',side_effect=call), patch.object(self.service.claude,'status',side_effect=AssertionError('refresh must not authenticate')):
+            output=snapshot(self.service,session='existing')
+        rows=[[unquote(v) for v in line.split('\t')] for line in output.splitlines()]
+        current=[r for r in rows if r[0]=='current'][0]
+        conversation=[r for r in rows if r[0]=='conversation'][0]
+        self.assertEqual(current[1],'existing')
+        self.assertEqual(conversation[2],'Existing project')
+        self.assertEqual(conversation[-2:],['off','external'])
+
+    def test_mode_cli_parser_and_frozen_receipt(self):
+        from thurbox_accounts.cli import parser
+        from thurbox_accounts.pane import receipt
+        self.assertEqual(parser().parse_args(['mode-off','--session','existing']).session,'existing')
+        output=receipt('mode-preview',dict(id='token',session='s',conversation='uuid',name='Existing',
+            expires_at=123,proof_ready=False,profiles=['a','b'],source_profile='a',
+            contract={'profiles':[dict(name='a',identity=dict(email='a@example.invalid',orgId='org-a'))]},
+            accounts=[dict(name='a',label='Work A',email='a@example.invalid',orgId='org-a')]))
+        self.assertIn('mode-plan\t',output)
+        self.assertIn('mode-account\t',output)
+        self.assertNotIn('{',output)
+
+    def test_unsupported_current_agent_is_explained_without_claiming_switchable(self):
+        from thurbox_accounts.pane import snapshot
+        row=dict(id='codex',name='Other provider',agent='codex',host=None,backend_type='tmux',cwd='/project')
+        def call(*args): return {'sessions':[]} if args[:2]==('session','list') else row
+        with patch.object(self.service.thurbox,'call',side_effect=call): output=snapshot(self.service,session='codex')
+        self.assertIn('unsupported\tcodex',output)
+        self.assertNotIn('conversation\tcodex',output)

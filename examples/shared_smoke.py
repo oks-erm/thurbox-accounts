@@ -12,6 +12,7 @@ import uuid
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mode',action='store_true',help='Adopt an ordinary source and exercise conversation mode Off/On')
     parser.add_argument('--desktop',action='store_true',help='Also exercise desktop listing/capture/literal send')
     parser.add_argument('--thurbox-cli',default='thurbox-cli')
     args = parser.parse_args()
@@ -30,7 +31,8 @@ from pathlib import Path
 args=sys.argv[1:]
 profile=Path(os.environ['CLAUDE_CONFIG_DIR'])
 if args[:2]==['auth','status']:
-    print(json.dumps(dict(loggedIn=True,authMethod='claude.ai',configDirectory=str(profile),email=profile.name+'@example.invalid',orgId=profile.name)))
+    identity='enterprise-a' if profile.name=='untracked-native' else profile.name
+    print(json.dumps(dict(loggedIn=True,authMethod='claude.ai',configDirectory=str(profile),email=identity+'@example.invalid',orgId=identity)))
     raise SystemExit(0)
 def option(name): return args[args.index(name)+1]
 identifier=option('--session-id') if '--session-id' in args else option('--resume')
@@ -84,11 +86,32 @@ while True:
         store.add('enterprise-b')
         # Synthetic fixture proof is bound to this synthetic executable only.
         store.write('shared-proof.json',shared.proof_contract(['enterprise-a','enterprise-b']))
-        source = service.start('enterprise-a',root,'synthetic-source')
+        if args.mode:
+            origin=root/'untracked-native'; origin.mkdir(mode=0o700)
+            source=tb.call('session','create','--name','synthetic-existing','--repo-path',str(root),
+                '--agent','claude','--env','CLAUDE_CONFIG_DIR='+str(origin),'--on-existing','fail')
+        else:
+            source = service.start('enterprise-a',root,'synthetic-source')
         sessions.append(source['id'])
         wait(lambda: tb.call('session','get',source['id']).get('transcript_path'))
         tb.call('session','stop',source['id'])
-        current = shared.enroll(source['id'],['enterprise-a','enterprise-b'],consent=True)
+        if args.mode:
+            from thurbox_accounts.mode import Mode
+            from thurbox_accounts.pane import snapshot
+            mode=Mode(service)
+            row=tb.call('session','get',source['id']); original=Path(row['transcript_path'])
+            original_bytes=original.read_bytes()
+            assert 'synthetic-existing' in snapshot(service,source['id'])
+            plan=mode.preview(source['id'],['enterprise-a','enterprise-b'])
+            current=mode.enable(plan['id'],consent=True)
+            assert original.read_bytes()==original_bytes and not original.is_symlink()
+            mode.set_enabled(current['session'],False)
+            try: shared.switch(current['conversation'])
+            except ValueError as error: assert 'Off' in str(error)
+            else: raise AssertionError('Disabled mode allowed a switch')
+            mode.set_enabled(current['session'],True)
+        else:
+            current = shared.enroll(source['id'],['enterprise-a','enterprise-b'],consent=True)
         conversation = current['conversation']
         sessions.append(current['session'])
         for target in ('enterprise-b','enterprise-a'):
@@ -104,6 +127,7 @@ while True:
         wait(lambda: shared._runtime(conversation).get('turn') == 'quota')
         record = shared.load(conversation)
         shared.validate(record)
+        if args.mode: assert original.read_bytes()==original_bytes and not original.is_symlink()
         text = Path(record['transcript']).read_text()
         assert 'SYNTHETIC-enterprise-a' in text and 'SYNTHETIC-enterprise-b' in text
         if args.desktop:
@@ -132,7 +156,8 @@ while True:
         assert Path(record['transcript']).read_text() == text
         summary = dict(real_thurbox=True,synthetic_claude=True,native_enterprise_auth_verified=False,
             same_conversation_uuid=True,canonical_history=True,separate_profile_env=True,
-            sequential_a_b_a=True,stale_writer_rejected=True,desktop_adapter_verified=args.desktop,artifacts=str(root))
+            sequential_a_b_a=True,stale_writer_rejected=True,desktop_adapter_verified=args.desktop,
+            ordinary_adoption_verified=args.mode,mode_off_on_verified=args.mode,artifacts=str(root))
         atomic_write(root/'summary.json',dumps(summary))
         print(dumps(summary))
     finally:

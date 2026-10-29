@@ -181,7 +181,7 @@ class Shared:
             if recover and any(row.get('id') == owner for row in rows):
                 self.tb.call('session','start',owner)
             else:
-                self.tb.call('session','create','--id',owner,'--name',record.get('name','shared-' + owner[:10]),
+                self.tb.call('session','create','--id',owner,'--name',(record['name']+' · '+owner[:6] if record.get('name') else 'shared-'+owner[:10]),
                     '--repo-path',record['cwd'],'--agent',AGENT,'--multiplexer','tmux',
                     '--resume',record['conversation'],'--on-existing','fail',
                     '--env','CLAUDE_CONFIG_DIR=' + target['directory'],

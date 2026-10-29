@@ -166,3 +166,17 @@ class ModeTests(unittest.TestCase):
         with patch.object(self.accounts.claude,'fingerprint',return_value='changed'):
             with self.assertRaisesRegex(ValueError,'verify|changed'): self.enable(plan['id'])
         self.assertFalse((self.store.root/('shared-'+UUID+'.json')).exists())
+
+    def test_failed_launch_projection_does_not_claim_target_is_current(self):
+        from thurbox_accounts.desktop import Desktop
+        self.enable(self.mode().preview('ordinary',['a','b'])['id'])
+        shared=Shared(self.accounts); record=shared.load(UUID)
+        record.update(phase='failed',index=1); shared.save(record)
+        state=Desktop(self.accounts).state()
+        self.assertEqual(state['conversations'][0]['profile'],'a')
+
+    def test_mode_change_is_serialized_with_switch_transition(self):
+        self.enable(self.mode().preview('ordinary',['a','b'])['id'])
+        with self.store.lock('transition-'+UUID):
+            with self.assertRaisesRegex(ValueError,'progress'): self.mode().set_enabled('managed',False)
+        self.assertTrue(Shared(self.accounts).load(UUID)['mode']['enabled'])

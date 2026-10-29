@@ -57,3 +57,16 @@ attach to the enclosing engineering-tools repository, not this standalone repo.
 Ruling: an ordinary source must be explicitly stopped first; no safe evidence
 exists to automatically terminate pre-mode background tools. Cost: one safe stop
 is required during initial setup. The pane explains this directly.
+
+Task 2 complete: current source projection, frozen backend confirmation receipt,
+separate login selection, mode On/Off and recovery labels implemented. 15 mode
+tests and 7 pane tests pass. Real Lua/PTY smoke passes ordinary setup, missing
+proof refusal, ordered identities/confirmation, Off action refusal, On and named
+switch, F7 login return, 80x20 controls and short-pane consent blocking.
+Task 3 integration evidence: real Thurbox/tmux ordinary adoption + Off/On + A/B/A
++ same UUID/history/profile isolation + desktop/stale-writer checks pass at
+/private/tmp/tbx-shared-smoke-8cdcwbv4. All native commands are synthetic fixtures.
+
+Pre-review checks: full suite 77/77, compileall and diff check pass. Real UI
+Off/On/named switch and short-window checks passed at tbx-guided-6f27kzm4.
+No outstanding plan/interface conflicts. Final review and live delivery remain.

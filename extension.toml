@@ -1,7 +1,7 @@
 name = "thurbox-accounts"
 description = "Isolated Claude Enterprise logins and one-click shared conversation switching"
 config_version = 1
-version = "0.3.0"
+version = "0.4.0"
 
 [[files]]
 path = "bin/thurbox-accounts"
@@ -73,3 +73,6 @@ path = "desktop/Accounts.swift"
 
 [[files]]
 path = "thurbox_accounts/pane.py"
+
+[[files]]
+path = "thurbox_accounts/mode.py"

@@ -41,7 +41,17 @@ def parser():
         command.add_argument('--session')
         if action == 'switch':
             command.add_argument('--expected-profile')
-    commands.add_parser('pane-state')
+    pane_state = commands.add_parser('pane-state')
+    pane_state.add_argument('--session')
+    mode_preview = commands.add_parser('mode-preview',help='Review switching mode for an existing stopped local conversation')
+    mode_preview.add_argument('--session',required=True)
+    mode_preview.add_argument('--profile',action='append',required=True)
+    mode_enable = commands.add_parser('mode-enable')
+    mode_enable.add_argument('token')
+    mode_enable.add_argument('--consent',action='store_true')
+    for action in ('mode-on','mode-off'):
+        mode_toggle = commands.add_parser(action)
+        mode_toggle.add_argument('--session',required=True)
     pane_add = commands.add_parser('pane-add')
     pane_add.add_argument('label')
     pane_run = commands.add_parser('pane-run')
@@ -81,7 +91,7 @@ def run(args):
     if verb in {'pane-state','pane-add','pane-run'}:
         from .pane import OPERATIONS, add, receipt, snapshot
         if verb == 'pane-state':
-            print(snapshot(service))
+            print(snapshot(service,args.session))
         elif verb == 'pane-add':
             print(dumps(add(profiles,args.label)))
         else:
@@ -95,6 +105,14 @@ def run(args):
                 run(target)
             from .thurbox import strict_json
             print(receipt(operation[0],strict_json(output.getvalue())))
+        return 0
+    if verb.startswith('mode-'):
+        from .mode import Mode
+        mode = Mode(service)
+        if verb == 'mode-preview': result = mode.preview(args.session,args.profile)
+        elif verb == 'mode-enable': result = mode.enable(args.token,consent=args.consent)
+        else: result = mode.set_enabled(args.session,verb=='mode-on')
+        print(dumps(result))
         return 0
     if verb.startswith('desktop-'):
         from .desktop import Desktop

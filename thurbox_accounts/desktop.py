@@ -42,8 +42,9 @@ class Desktop:
             binding = bindings.get(owner)
             if record and row.get('agent') == 'claude-accounts':
                 index = record['index']
+                confirmed = record.get('mode',{}).get('active_index',index) if record['phase'] != 'active' else index
                 conversations.append(dict(id=owner,name=row.get('name',owner),cwd=row['cwd'],
-                    profile=record['profiles'][index],next_profile=record['profiles'][(index+1)%len(record['profiles'])],
+                    profile=record['profiles'][confirmed],next_profile=record['profiles'][(index+1)%len(record['profiles'])],
                     conversation=record['conversation'],shared=True,stopped=bool(row.get('stopped')),
                     phase=record['phase']))
             elif binding and row.get('agent') == 'claude':
@@ -54,7 +55,7 @@ class Desktop:
         for owner, record in records.items():
             if owner and owner not in present and (record['phase'] in {'failed','switching'} or not record.get('allowed_session')):
                 conversations.append(dict(id=owner,name='Resume failed conversation',cwd=record['cwd'],
-                    profile=record['profiles'][record['index']],shared=True,stopped=True,
+                    profile=record['profiles'][record.get('mode',{}).get('active_index',record['index'])],shared=True,stopped=True,
                     phase=record['phase'] if record.get('allowed_session') else 'failed',conversation=record['conversation']))
         return dict(profiles=profiles,conversations=conversations)
 

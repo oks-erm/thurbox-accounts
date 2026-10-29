@@ -3,7 +3,8 @@
 A standalone Thurbox extension for switching between Claude Enterprise accounts.
 Each profile has a separate native SSO login and configuration directory. Start
 new sessions under a selected account, or enable one-click switching on a
-selected conversation with one shared local history. Includes the Accounts pane (F7).
+selected conversation with one shared local history. Includes the Accounts pane (F7)
+and an On/Off mode for existing local conversations in WSL, macOS and Linux.
 
 ## Install
 
@@ -94,12 +95,51 @@ paths from its build, so rerun that command if Python/Claude/Thurbox paths chang
 1. Press **F7**. Click **Open Settings** if the pane asks for its one-time permissions.
 2. Enter a friendly account name (for example Work A), click **Add account**, then **Log in to Work A**. Finish Claude’s browser/SSO login; **F7** returns to your accounts. Repeat for the other account.
 3. Click **Conversations → New conversation**, choose/paste your project folder, then **Create conversation**.
-4. To reuse its history with another account, select the conversation and click **Set up account switching**. Select accounts in switching order, **Check compatibility**, then **Enable switching**. Each step explains and confirms allowance use or organization access. Stop the conversation at a safe point before enabling.
-5. Later, select that conversation and click **Switch to ACCOUNT**.
+4. For an existing conversation, follow **Current-conversation mode** below.
+5. Once its mode is On, click **Switch to ACCOUNT** when you want to change accounts.
 
 Click controls directly, or use **Tab** and **Enter**. No Alt shortcuts, internal session IDs or comma-separated account names are needed. If a confirmation does not fit, enlarge the pane before continuing.
 
 Install/update on the computer and terminal where Thurbox runs. Updating a Mac does not update a Windows/WSL copy.
+
+## Current-conversation mode
+
+1. Select your existing Claude conversation in Thurbox's session list. Finish any
+   tools, shell jobs and subagents before setup. In a second WSL terminal, park
+   the conversation safely with `thurbox-cli session stop CONVERSATION_NAME`.
+   This keeps its history and checkout. Do not stop a session with work still running.
+2. Press **F7**. The pane shows that existing conversation, even if Accounts did
+   not create it. Click **Turn switching mode On…**, then choose the accounts in
+   switching order and **Review and enable mode…**.
+3. Review exactly which accounts/organizations can use its context. If a native
+   compatibility check is needed, the pane asks separately before spending account
+   allowance. An account already at its limit can block this initial check; the
+   mode stays Off and explains why. A valid saved check is reused.
+4. Approve setup. The pane prepares the history and focuses a guarded session
+   named after the original with **(switchable)** and a short unique suffix.
+   Click its named **Switch to ACCOUNT** button whenever needed.
+5. **Turn switching Off** keeps the current account running and blocks further
+   account switches, including the CLI. **Turn switching On** restores the same
+   approved group without another paid check while its proof remains valid.
+
+Selecting an account under **Logins / new conversations** only selects it for
+login and new work; it does not change the account of an existing conversation.
+The mode prepares switching automatically after approval; switching at a limit
+remains one click, not automatic rotation.
+
+Only the selected conversation is enrolled. For an untracked original, setup
+keeps its original files unchanged and takes one initial snapshot of its native
+UUID history/sidecars. Subsequent switches use the same UUID and canonical local
+history without copying or forking it. Previously account-managed sessions retain
+their existing move/link enrollment. Keep the old original stopped and use the new
+managed session. Conflicting UUIDs, uncertain ownership, unsafe paths and active
+work are refused; failed setup preserves recovery evidence. Off does not erase
+history or undo organization access already granted.
+
+Advanced CLI: `mode-preview --session NAME --profile work-a --profile work-b`
+returns a five-minute confirmation token; `mode-enable TOKEN --consent` applies it.
+Use `mode-off --session CURRENT_MANAGED_SESSION` and `mode-on --session CURRENT_MANAGED_SESSION`
+for later toggles. Prefix each action with `thurbox-accounts`.
 
 ## CLI account setup
 

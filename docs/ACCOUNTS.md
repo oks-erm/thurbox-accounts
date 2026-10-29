@@ -42,8 +42,9 @@ Press **F7** to open/leave Accounts. In **Ctrl+, → ]**, select Accounts and
 grant its **run/program** capabilities yourself. Installation never grants them.
 Click **Add account**, give it a friendly name, then **Log in**. Complete native
 SSO and press **F7** to return. Repeat for each account. Open **Conversations**
-to create/open conversations or select **Set up account switching**. Select
-accounts in switching order; **Check compatibility** and **Enable switching**
+to create/open conversations or select **Turn switching mode On…** for the
+current existing conversation. Select
+accounts in switching order; **Check compatibility** and **Review and enable mode…**
 each show an explicit confirmation. Later use the named **Switch to** button.
 Use clicks, or Tab/Enter. No profile IDs or Alt shortcuts are required.
 Enlarge the pane if the sharing confirmation cannot fit.
@@ -99,3 +100,13 @@ Automated fixtures cover isolation, stale/expired confirmations, failure recover
 and native-fork command routing. Live tests without Enterprise logins cannot prove
 cross-organization authentication or transcript portability; complete SSO and the
 native verification before transferring real context.
+
+## Current-conversation mode (0.4.0)
+
+See the [short mode walkthrough](../README.md#current-conversation-mode).
+Existing untracked local Claude sessions are visible when selected in Thurbox.
+The source account is verified from its native directory/status, not the login
+picker. Finish work and explicitly park the original before setup. One initial
+snapshot preserves its original files; subsequent switches share canonical UUID
+history. On/Off is per conversation and Off is enforced in the CLI too.
+Switching mode is separate from automatic rotation; switching remains one click.

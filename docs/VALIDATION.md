@@ -106,3 +106,22 @@ opens/closes Accounts. Live plugin check reports no conflicts, warnings or
 dropped pills. Seven UI-delivery/installer tests pass. An isolated real TUI
 received F7 terminal input and changed focus agent → accounts → agent.
 Fixture: `/private/tmp/tbx-f7-check-opqmqooy`. No sessions, model calls or grants.
+
+## Current-conversation mode — v0.4.0
+
+77 Python tests and compile/diff checks pass. Coverage includes untracked source
+identity/directory verification, stopped-source requirements, bounded sidecars,
+symlink/collision/source-change refusal, single-use expiring consent, Off/On,
+transition serialization, original resume refusal and honest failed-account labels.
+Real Thurbox/tmux with synthetic Claude passes ordinary adoption, unchanged
+original files, mode Off refusal, On restore, A→B→A, same native UUID/canonical
+history, separate profile environment, desktop adapter and stale-writer refusal.
+Artifacts: `/private/tmp/tbx-shared-smoke-8cdcwbv4/summary.json`.
+Real isolated Lua VM/PTY smoke passes frozen mode consent, missing-proof block,
+paid-check review, On/Off/named switch, keyboard setup, F7 login return,
+80x20 primary buttons/forms and refusal of consent in a short pane.
+Artifacts: `/private/tmp/tbx-guided-6f27kzm4`.
+No real native authentication/model calls, WSL execution or Enterprise account
+portability were verified on the connected Mac. Native proof gates remain intact.
+The 2.75.2 live checker emits its generic raw-click catalog warning despite
+semantic actions; loading and layout validation still succeed. No auto grants.

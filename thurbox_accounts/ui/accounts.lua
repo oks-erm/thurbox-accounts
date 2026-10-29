@@ -14,12 +14,13 @@ local function decode(s) return (s or ""):gsub("%%(%x%x)", function(h) return st
 local function result() return (thurbox.runs or {})[state.request_key or "none"] end
 local function busy() local r = result(); return state.request_key ~= nil and (not r or r.state ~= "done") end
 local function data_key()
-  return "accounts-data-" .. tostring(state.request_number or 0) .. (busy() and "-pending" or "-done")
+  return "accounts-data-" .. tostring(state.request_number or 0) .. (busy() and "-pending" or "-done") .. "-" .. tostring(store.selected or "none")
 end
 local function forget_data()
   if run_forget then
     local prefix = "accounts-data-" .. tostring(state.request_number or 0)
-    run_forget(prefix .. "-pending"); run_forget(prefix .. "-done")
+    local suffix = "-" .. tostring(store.selected or "none")
+    run_forget(prefix .. "-pending" .. suffix); run_forget(prefix .. "-done" .. suffix)
   end
 end
 local function refresh()
@@ -48,9 +49,11 @@ local function model()
     local f = {}; for value in (row .. "\t"):gmatch("(.-)\t") do f[#f + 1] = decode(value) end
     if f[1] == "account" and #f == 5 then
       m.accounts[#m.accounts + 1] = { name = f[2], label = f[3], email = f[4], saved = f[5] == "saved" }
-    elseif f[1] == "conversation" and #f == 10 then
+    elseif f[1] == "conversation" and (#f == 10 or #f == 12) then
       m.conversations[#m.conversations + 1] = { id = f[2], name = f[3], profile = f[4], shared = f[5] == "shared",
-        next = f[6], cwd = f[7], stopped = f[8] == "stopped", conversation = f[9], phase = f[10] }
+        next = f[6], cwd = f[7], stopped = f[8] == "stopped", conversation = f[9], phase = f[10], mode = f[11] or "on", external = f[12] == "external" }
+    elseif f[1] == "current" then m.current = f[2]
+    elseif f[1] == "unsupported" then m.unsupported = f[3]
     elseif f[1] == "proof" then m.proof = f[2] end
   end
   return m
@@ -61,8 +64,9 @@ local function account(m)
   return m.accounts[1]
 end
 local function conversation(m)
+  if m.unsupported and not state.conversation then return nil end
   for _, c in ipairs(m.conversations) do if c.id == state.conversation then return c end end
-  for _, c in ipairs(m.conversations) do if c.id == store.selected then return c end end
+  for _, c in ipairs(m.conversations) do if c.id == m.current or c.id == store.selected then return c end end
   return m.conversations[1]
 end
 local function label(m, name)
@@ -125,11 +129,30 @@ local function page_rows(rows, page)
   for i = first, math.min(#rows, first + 3) do visible[#visible + 1] = rows[i] end
   return visible
 end
+local function mode_review()
+  local answer = result()
+  if not answer or answer.state ~= "done" or not answer.ok then return nil end
+  local pending
+  for row in (answer.stdout or ""):gmatch("[^\r\n]+") do
+    local f = {}; for item in (row .. "\t"):gmatch("(.-)\t") do f[#f + 1] = decode(item) end
+    if f[1] == "mode-plan" and #f == 8 then
+      pending = { kind = "modeenable", token = f[2], source = f[3], conversation = f[4], title = f[5],
+        source_profile = f[6], expires = tonumber(f[7]), proof_ready = f[8] == "ready", profiles = {}, identities = {} }
+    elseif f[1] == "mode-account" and #f == 5 and pending then
+      pending.profiles[#pending.profiles + 1] = f[2]
+      pending.identities[f[2]] = f[3] .. " — " .. f[4] .. " — " .. f[5]
+    end
+  end
+  return pending
+end
+local function pending_review() return state.pending or mode_review() end
 local function submit_confirmation()
-  local p = state.pending
+  local p = pending_review()
   if not p or not ready_to_confirm or p.token ~= displayed_confirmation then return end
   state.pending = nil; state.focus = 1
-  if p.kind == "verify" then
+  if p.kind == "modeenable" then
+    ask({ "mode-enable", p.token, "--consent" }); state.screen = "conversations"
+  elseif p.kind == "verify" then
     local args = { "verify-shared" }; for _, name in ipairs(p.profiles) do args[#args + 1] = name end; ask(args, true)
   elseif p.kind == "enable" then
     local args = { "enable-shared", "--session", p.source, "--consent" }
@@ -140,14 +163,14 @@ end
 
 dispatch = function(id)
   if id == "accounts.open" then
-    if state.login_profile then state.login_profile = nil; refresh(); command("focus", { text = "accounts" })
-    else command("focus", { text = "accounts", toggle = true }) end
+    if state.login_profile then state.login_profile = nil; state.screen = "accounts"; refresh(); command("focus", { text = "accounts" })
+    else state.conversation = nil; state.screen = store.selected and "conversations" or "accounts"; command("focus", { text = "accounts", toggle = true }) end
     return true
   end
   if id:sub(1, 9) == "accounts." then id = id:sub(10) end
   if id == "settings" then command("action", { text = "settings.open" }); return true end
   if id == "done-login" then state.login_profile = nil; refresh(); return true end
-  if id == "cancel" then state.pending = nil; state.focus = 1; return true end
+  if id == "cancel" then state.pending = nil; refresh(); state.focus = 1; return true end
   if busy() then return true end
   if id == "confirm" then submit_confirmation(); return true end
   local m, p = model(), account(model()); local c = conversation(m)
@@ -159,7 +182,7 @@ dispatch = function(id)
   elseif id == "status" and p then ask({ "status", p.name })
   elseif id == "new-form" then
     if not p or not p.saved then navigate("accounts"); state.message = "Choose an account and click Log in before starting a conversation."
-    else state.new_form = not state.new_form; state.focus = 1 end
+    else state.screen = "conversations"; state.new_form = not state.new_form; state.focus = 1 end
   elseif id == "create" and p then
     local folder = value("repo", default_folder())
     if folder == "" then state.message = "Choose a project below or paste its folder path."; return true end
@@ -168,12 +191,26 @@ dispatch = function(id)
   elseif (id == "open" or id == "open-conversation") and c then store.selected = c.id; command("focus", { text = "agent" })
   elseif id == "stop" and c then start_confirmation("stop", m)
   elseif id == "resume" and c then ask({ "desktop-start", c.id })
-  elseif id == "switch" and c and c.shared and c.next ~= "" then ask({ "switch", "--session", c.id, "--expected-profile", c.next })
+  elseif id == "mode-off" and c and c.shared then ask({ "mode-off", "--session", c.id })
+  elseif id == "mode-on" and c and c.shared then ask({ "mode-on", "--session", c.id })
+  elseif id == "switch" and c and c.shared and c.mode ~= "off" and c.next ~= "" then ask({ "switch", "--session", c.id, "--expected-profile", c.next })
   elseif id == "recover" and c and c.conversation ~= "" then ask({ "recover-shared", c.conversation })
   elseif id == "sharing" and c then navigate("sharing")
+  elseif id == "mode-verify" then
+    local review = mode_review()
+    if review then
+      state.confirmation_number = (state.confirmation_number or 0) + 1
+      state.pending = {kind = "verify", token = state.confirmation_number, profiles = review.profiles,
+        identities = review.identities, title = review.title}
+      state.focus = 1
+    end
   elseif id == "verify" or id == "enable" then
     if #group(m) < 2 then state.message = "Select at least two accounts, in the order you want to use them."
     elseif id == "enable" and (not c or not c.stopped or c.shared) then state.message = "Select an ordinary conversation and stop it after its tools finish."
+    elseif id == "enable" then
+      local args = { "mode-preview", "--session", c.id }
+      for _, arg in ipairs(profile_args(group(m))) do args[#args + 1] = arg end
+      ask(args)
     else start_confirmation(id, m) end
   elseif id == "more-accounts" then state.account_page = ((state.account_page or 0) + 1) % math.max(1, math.ceil(#m.accounts / 4))
   elseif id == "more-conversations" then state.conversation_page = ((state.conversation_page or 0) + 1) % math.max(1, math.ceil(#m.conversations / 4))
@@ -197,7 +234,10 @@ return {
   focusable = true, input = "session", capabilities = { "run", "program" },
   keys = { { key = "f7", action = "accounts.open", desc = "Accounts", scope = "global" } },
   commands = {
-    { action = "accounts.accounts", desc = "Show connected accounts" },
+    { action = "accounts.mode-on", desc = "Enable approved switching mode for this conversation" },
+    { action = "accounts.mode-off", desc = "Disable account switches for this conversation" },
+    { action = "accounts.mode-verify", desc = "Review paid compatibility check for switching mode" },
+    { action = "accounts.accounts", desc = "Show logins and account for new conversations" },
     { action = "accounts.conversations", desc = "Show account conversations" },
     { action = "accounts.add-form", desc = "Add another account" },
     { action = "accounts.add", desc = "Add the named account" },
@@ -234,7 +274,7 @@ return {
       click("Done / Back to accounts (F7)", "done-login")
       add({ type = "surface", program = "accounts-" .. state.login_profile })
     else
-      run(data_key(), BASE .. " pane-state", { machine = "local", timeout = 30, ttl = 3 })
+      run(data_key(), BASE .. " pane-state" .. (store.selected and " --session " .. quote(store.selected) or ""), { machine = "local", timeout = 30, ttl = 3 })
       local m = model(); local p, c = account(m), conversation(m)
       if not m.ready then
         say(m.error and "Couldn't connect to the account helper installed in this terminal." or "Loading your accounts…")
@@ -244,35 +284,43 @@ return {
           if state.details then say(m.error:sub(1, 1500)) end
         end
         click("Refresh", "refresh"); click("Back to conversation", "accounts.open")
-      elseif state.pending then
-        local pending = state.pending
-        say(pending.kind == "verify" and "Check these accounts before enabling switching?" or pending.kind == "enable" and "Allow these accounts to use this conversation?" or "Stop this conversation?")
+      elseif pending_review() then
+        local pending = pending_review()
+        say(pending.kind == "verify" and "Check these accounts before enabling switching?" or (pending.kind == "enable" or pending.kind == "modeenable") and "Enable switching mode for this conversation?" or "Stop this conversation?")
         if pending.title then say("Conversation: " .. pending.title) end
         local rows = 0; for _, node in ipairs(children) do rows = rows + node.len end
         for index, name in ipairs(pending.profiles) do
-          local identity = name
-          for _, item in ipairs(m.accounts) do if item.name == name then identity = name .. " — " .. item.email end end
+          local identity = pending.identities and pending.identities[name] or name
+          if not pending.identities then for _, item in ipairs(m.accounts) do if item.name == name then identity = name .. " — " .. item.email end end end
           local node = line(tostring(index) .. ". " .. identity); add(node); rows = rows + node.len
         end
         local explanation = pending.kind == "verify" and "This uses account allowance for synthetic checks (six requests plus a subagent for two accounts, up to $0.25 per top-level request). It does not send an existing conversation. It may take several minutes."
-          or pending.kind == "enable" and "These accounts and their organizations can use this conversation's context. Only this history and its sidecars are shared. Logins stay separate. This approval applies to later one-click switches."
+          or (pending.kind == "enable" or pending.kind == "modeenable") and "These accounts and their organizations can use this conversation's context. Only this history and its sidecars are shared. Logins stay separate. This approval applies to later one-click switches."
           or "Stop only after tools and subagents finish. Conversation history is retained."
+        if pending.kind == "modeenable" then
+          explanation = explanation .. " The stopped original is preserved; only this conversation is prepared. Off later prevents switches without erasing prior access."
+          if not pending.proof_ready then explanation = explanation .. " Compatibility check is required first; an exhausted account can block it." end
+        end
         local node = line(explanation); add(node); rows = rows + node.len
         ready_to_confirm = (ctx.height or 0) >= rows + 7
         displayed_confirmation = pending.token
-        if ready_to_confirm then click(pending.kind == "verify" and "Run compatibility check" or pending.kind == "enable" and "Allow switching for these accounts" or "Stop conversation", "confirm")
+        if pending.kind == "modeenable" and not pending.proof_ready then
+          ready_to_confirm = false
+          if (ctx.height or 0) >= rows + 7 then click("Review compatibility check…", "mode-verify")
+          else say("Enlarge this pane to read the compatibility notice.") end
+        elseif ready_to_confirm then click(pending.kind == "verify" and "Run compatibility check" or (pending.kind == "enable" or pending.kind == "modeenable") and "Allow switching for these accounts" or "Stop conversation", "confirm")
         else say("Enlarge this pane to read all details before continuing.") end
         click("Cancel", "cancel")
       else
-        click("Accounts", "accounts"); click("Conversations", "conversations")
+        click("Logins / new conversations", "accounts"); click("Current conversation / conversations", "conversations")
         if busy() then say("Working… Please wait. Compatibility checks can take several minutes.")
         elseif state.message then say(state.message)
         else
           local answer = result()
-          if answer and answer.state == "done" then say((answer.ok and answer.stdout or answer.stderr or answer.error or "Operation failed"):sub(1, 1500)) end
+          if answer and answer.state == "done" then say((answer.ok and answer.stdout or answer.stderr or answer.error or "Operation failed"):sub(1, 500)) end
         end
-        if (state.screen or "accounts") == "accounts" then
-          say(#m.accounts == 0 and "1. Add your first account" or "1. Your accounts — click one to select it")
+        if (state.screen or (m.current and "conversations" or "accounts")) == "accounts" then
+          say(#m.accounts == 0 and "1. Add your first account" or "Accounts for login / new conversations. Selecting one does not switch existing work.")
           for _, item in ipairs(page_rows(m.accounts, state.account_page)) do
             click((p and p.name == item.name and "Selected: " or "") .. item.label .. " — " .. (item.saved and item.email or "Login required"), "account:" .. item.name)
           end
@@ -293,8 +341,8 @@ return {
           end
           if #m.accounts > 4 then click("More accounts", "more-accounts") end
           say("Check compatibility once, then approve sharing for this conversation.")
-          click("Check compatibility…", "verify"); click("Enable switching…", "enable")
-          if c and not c.stopped then say("Before enabling, stop this conversation after its work finishes."); click("Stop conversation…", "stop") end
+          click("Check compatibility…", "verify"); click("Review and enable mode…", "enable")
+          if c and not c.stopped then say("Finish tools and shell jobs, then stop this conversation in Thurbox before enabling."); if not c.external then click("Stop conversation…", "stop") end end
           click("Back to conversations", "conversations")
         else
           if state.new_form and p then
@@ -303,17 +351,21 @@ return {
             add(input("repo", "Project folder — choose above or paste a path", default_folder()))
             add(input("title", "Conversation name (optional)")); click("Create conversation", "create"); click("Cancel", "new-form")
           else
-            say("2. Your conversations")
+            say(m.unsupported or "Current conversation and account-managed conversations")
             for _, item in ipairs(page_rows(m.conversations, state.conversation_page)) do
-              click((c and c.id == item.id and "Selected: " or "") .. item.name .. " — " .. label(m, item.profile), "conversation:" .. item.id)
+              click((c and c.id == item.id and "Selected: " or "") .. item.name .. " — " .. (item.external and "Existing conversation" or label(m, item.profile)), "conversation:" .. item.id)
             end
             if #m.conversations > 4 then click("More conversations", "more-conversations") end
             if c then
-              say("Account: " .. label(m, c.profile) .. " | " .. (c.stopped and "Stopped" or "Running"))
-              if c.shared and c.next ~= "" then click("Switch to " .. label(m, c.next), "switch") end
+              say("Conversation: " .. c.name)
+              say((c.shared and c.phase ~= "active" and "Last confirmed account: " or "Current account: ") .. (c.external and "verified during setup" or label(m, c.profile)) .. " | " .. (c.stopped and "Stopped" or "Running"))
+              say("Account switching: " .. (c.shared and c.phase ~= "active" and "Needs recovery" or c.shared and c.mode ~= "off" and "On" or "Off"))
+              if c.shared and c.phase == "active" then click(c.mode == "off" and "Turn switching On" or "Turn switching Off", c.mode == "off" and "mode-on" or "mode-off") end
+              if c.shared and c.mode ~= "off" and c.phase == "active" and c.next ~= "" then click("Switch to " .. label(m, c.next), "switch") end
               if c.phase == "failed" or c.phase == "switching" then click("Recover conversation", "recover")
+              elseif c.external then click("Back to this conversation", "open")
               elseif c.stopped then click("Resume conversation", "resume") else click("Open conversation", "open"); click("Stop conversation…", "stop") end
-              if not c.shared then click("Set up account switching…", "sharing") end
+              if not c.shared then click("Turn switching mode On…", "sharing") end
             else say("Start a conversation here to use it with your selected account.") end
             if p then click("New conversation using " .. p.label, "new-form") else say("Add and log in to an account first.") end
 
@@ -324,6 +376,12 @@ return {
       end
     end
     return ui.panel({ title = "Claude Accounts", focused = ctx.focused, body = children })
+  end,
+  ui_state = function()
+    local m = model(); local c = conversation(m); local p = pending_review()
+    return { conversation = c and c.id, current_profile = c and c.profile,
+      switching_mode = c and c.shared and (c.mode == "off" and "off" or "on") or "off",
+      pending = p and p.kind, busy = busy() }
   end,
   on_action = dispatch,
   on_click = function(hit) if hit.id then return dispatch(hit.id) end return false end,

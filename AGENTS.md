@@ -114,3 +114,20 @@ stubbed operations, no trusted capabilities, logins or model requests.
 Thurbox 2.75.2 emits a generic raw-on_click catalog warning even when semantic
 commands exist; do not remove mouse support just to hide that warning.
 Windows use requires WSL; native PowerShell is not supported.
+
+## Current-conversation mode (0.4.0)
+
+`mode.py` verifies source launch metadata/native auth and bounds the selected
+transcript/sidecars (20 MB per file, 100 MB total, 2000 entries). Preview issues a
+single-use five-minute plan frozen to source metadata/content and approved group.
+No implicit paid verification; no auto-stop of untracked sources. Adoption keeps
+original untracked files, snapshots only selected UUID data, then reuses Shared
+writer/reservation/proof guards. Tracked sources reuse the existing move/link path.
+Persist recovery records before writing and refuse collisions/unsafe paths.
+Mode changes hold the same transition lock as switches. Off rejects Shared.switch
+and cross-account recovery/resume; same-account resume remains allowed. Failed
+launches display the last confirmed account. Legacy records remain manual.
+`pane-state --session` exposes the selected ordinary session without auth or
+mutations, maps old originals to their current managed owner, and explains
+unsupported agents. Keep login/new-work selection distinct from active account.
+Validate `examples/shared_smoke.py --mode --desktop` plus the real Lua smoke.

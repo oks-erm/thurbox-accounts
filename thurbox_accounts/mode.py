@@ -121,7 +121,7 @@ class Mode:
         if self.store.read(self.shared.key(source['conversation'])):
             raise ValueError('Conversation is already shared; select its managed session and turn the mode on')
         value = dict(id=str(uuid.uuid4()),expires_at=time.time()+300,profiles=names,
-                     contract=contract,proof_ready=self.store.read('shared-proof.json')==contract,**source)
+                     contract=contract,accounts=[dict(name=p['name'],label=self.store.get(p['name'])['label'],**p['identity']) for p in contract['profiles']],proof_ready=self.store.read('shared-proof.json')==contract,**source)
         self.store.write('mode-plan-'+value['id']+'.json',value)
         return value
 
