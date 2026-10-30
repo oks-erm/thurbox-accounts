@@ -1,5 +1,6 @@
 """Selected shared history and serialized account transitions; no model requests."""
 import os
+import contextlib
 from pathlib import Path
 import time
 import uuid
@@ -57,6 +58,10 @@ class Shared:
         return contract
 
     def validate(self, record):
+        if record.get('kind') == 'single':
+            from .simple import Simple
+            Simple(self.accounts).validate_single(record)
+            return
         conversation = identifier(record['conversation'])
         expected = self.store.root / 'shared' / conversation
         for name, filename in [('transcript','main.jsonl'), ('sidecars','session')]:
@@ -82,19 +87,24 @@ class Shared:
                 if not path.is_symlink() or path.resolve() != Path(record[key]):
                     raise ValueError('Shared history reference was replaced; preserved for manual recovery')
 
-    def enroll(self, source, names, *, consent=False, launch=True, mode=None, name=None, expected_digest=None, mode_plan=None):
+    def enroll(self, source, names, *, consent=False, launch=True, mode=None, name=None, expected_digest=None, mode_plan=None, guarded_source=False, transition_held=False):
         if not consent:
             raise ValueError('Explicit consent is required to share this conversation with the selected accounts')
         proof = self.require_proof(names)
-        row, binding, path, digest = self.accounts.source(source)
+        if guarded_source:
+            from .simple import Simple
+            row, binding, path, digest = Simple(self.accounts).source(source)
+        else:
+            row, binding, path, digest = self.accounts.source(source)
         if expected_digest and digest != expected_digest:
             raise ValueError('Source changed after confirmation; review setup again')
         if binding['profile'] not in names:
             raise ValueError('Include the current account in the approved order')
         conversation = identifier(row['agent_session_id'])
         key = self.key(conversation)
-        with self.store.lock('transition-' + conversation):
-            if self.store.read(key):
+        with (contextlib.nullcontext() if transition_held else self.store.lock('transition-' + conversation)):
+            prior = self.store.read(key)
+            if prior and not (guarded_source and prior.get('kind') == 'single' and prior.get('allowed_session') == row['id']):
                 raise ValueError('Conversation already enrolled; use switch')
             profiles = [self.store.get(name) for name in names]
             for profile in profiles:
@@ -117,6 +127,10 @@ class Shared:
             canonical, sidecars = folder / 'main.jsonl', folder / 'session'
             if canonical.exists() or sidecars.exists():
                 raise ValueError('A previous enrollment needs recovery; history was preserved')
+            if guarded_source:
+                observed = Simple(self.accounts).source(source)
+                if observed[0] != row or observed[3] != digest:
+                    raise ValueError('Named source changed before enrollment')
             if mode_plan is not None:
                 from .mode import Mode
                 Mode(self.accounts)._unchanged(mode_plan)
@@ -193,7 +207,8 @@ class Shared:
                     '--env','THURBOX_ACCOUNTS_CONVERSATION=' + record['conversation'],
                     '--env','THURBOX_ACCOUNTS_RESERVATION=' + record['reservation'],
                     '--env','THURBOX_ACCOUNTS_PROFILE=' + target['name'],
-                    '--env','THURBOX_ACCOUNTS_CLAUDE=' + self.accounts.claude.executable)
+                    '--env','THURBOX_ACCOUNTS_CLAUDE=' + self.accounts.claude.executable,
+                    '--env','THURBOX_ACCOUNTS_CLI=' + (self.tb.command[0] if getattr(self.tb,'command',None) else 'thurbox-cli'))
             deadline = time.monotonic() + 25
             while time.monotonic() < deadline:
                 state = self._runtime(record['conversation'])
@@ -235,31 +250,36 @@ class Shared:
                 raise ValueError('Next account changed; refresh shared status before switching')
             target = self.accounts.authenticated(record['profiles'][next_index])
             self.accounts.check_launch(target)  # Validate before requesting source shutdown.
-            owner = record['allowed_session']
-            request = uuid.uuid4().hex
-            self.store.write('control-' + conversation + '.json',dict(owner=owner,request=request,action='stop'))
-            deadline = time.monotonic() + 15
-            while time.monotonic() < deadline:
-                state = self._runtime(conversation)
-                if state.get('owner') != owner:
-                    raise ValueError('Managed source ownership changed')
-                if state.get('request') == request and state.get('stop_result') == 'busy':
-                    if state.get('background_tools'):
-                        raise ValueError('Background shell/task completion is unconfirmed. Finish it in native Claude before switching; the source remains running')
-                    raise ValueError('Source is working, awaiting permission, or has no proven usage-limit stop; it remains running')
-                if state.get('phase') == 'stopped' and not state.get('native_pid'):
-                    if state.get('tools') or state.get('subagents') or state.get('background_tools') or state.get('blocked'):
-                        raise ValueError('Stopped source still has unconfirmed tool/subagent activity; target was not launched')
-                    break
-                if state.get('error'):
-                    raise ValueError(state['error'])
-                time.sleep(0.1)
-            else:
-                raise TimeoutError('Source did not confirm safe shutdown; target was not launched')
-            self.tb.call('session','stop',owner)
-            if self.tb.call('session','get',owner).get('stopped') is not True:
-                raise ValueError('Thurbox did not confirm source stopped')
+            self._pause(record)
             return self._launch(record,next_index)
+
+    def _pause(self, record, *, allow_idle=False):
+        conversation = record['conversation']
+        owner = record['allowed_session']
+        request = uuid.uuid4().hex
+        self.store.write('control-' + conversation + '.json',dict(owner=owner,request=request,action='stop-idle' if allow_idle else 'stop'))
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            state = self._runtime(conversation)
+            if state.get('owner') != owner:
+                raise ValueError('Managed source ownership changed')
+            if state.get('request') == request and state.get('stop_result') == 'busy':
+                if state.get('background_tools'):
+                    raise ValueError('Background shell/task completion is unconfirmed. Finish it in native Claude before switching; the source remains running')
+                raise ValueError('Source is working, awaiting permission, or has no proven usage-limit stop; it remains running')
+            if state.get('phase') == 'stopped' and not state.get('native_pid'):
+                from .guard import safe_state
+                if any(state.get(k) for k in ('tools','subagents','background_tools','blocked','uncertain','error')) or allow_idle and not safe_state(state,allow_idle=True):
+                    raise ValueError('Stopped source still has unconfirmed tool/subagent activity; target was not launched')
+                break
+            if state.get('error'):
+                raise ValueError(state['error'])
+            time.sleep(0.1)
+        else:
+            raise TimeoutError('Source did not confirm safe shutdown; target was not launched')
+        self.tb.call('session','stop',owner)
+        if self.tb.call('session','get',owner).get('stopped') is not True:
+            raise ValueError('Thurbox did not confirm source stopped')
 
     def recover(self, conversation):
         with self.store.lock('transition-' + identifier(conversation)):

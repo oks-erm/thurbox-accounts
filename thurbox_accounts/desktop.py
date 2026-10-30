@@ -40,12 +40,12 @@ class Desktop:
                 continue
             record = records.get(owner)
             binding = bindings.get(owner)
-            if record and row.get('agent') == 'claude-accounts':
+            if record and (row.get('agent') == 'claude-accounts' or record.get('kind') == 'single' and row.get('agent') == record.get('source_agent')):
                 index = record['index']
                 confirmed = record.get('mode',{}).get('active_index',index) if record['phase'] != 'active' else index
                 conversations.append(dict(id=owner,name=row.get('name',owner),cwd=row['cwd'],
                     profile=record['profiles'][confirmed],next_profile=record['profiles'][(index+1)%len(record['profiles'])],
-                    conversation=record['conversation'],shared=True,stopped=bool(row.get('stopped')),
+                    conversation=record['conversation'],shared=record.get('kind')!='single',stopped=bool(row.get('stopped')),
                     phase=record['phase']))
             elif binding and row.get('agent') == 'claude':
                 conversations.append(dict(id=owner,name=row.get('name',owner),cwd=row['cwd'],
@@ -73,7 +73,7 @@ class Desktop:
         if row.get('host') or row.get('backend_type') not in {None,'tmux','local:tmux'}:
             raise ValueError('Only owned local conversations are supported')
         if record:
-            if row.get('agent') != 'claude-accounts' or row.get('agent_session_id') != record['conversation']:
+            if row.get('agent') != ('claude-accounts' if record.get('kind')!='single' else record.get('source_agent')) or row.get('agent_session_id') != record['conversation']:
                 raise ValueError('Managed conversation identity changed')
             self.shared.validate(record)
         elif (row.get('agent') != 'claude' or row.get('agent_session_id') != binding.get('agent_session_id')
@@ -147,6 +147,9 @@ class Desktop:
                     raise ValueError('Shared conversation needs Recover, not an ordinary Resume')
                 if not row.get('stopped'):
                     return dict(id=owner,already_running=True)
+                if record.get('kind')=='single':
+                    profile=self.accounts.authenticated(record['profiles'][0]); self.accounts.check_launch(profile)
+                    return self.tb.call('session','start',owner)
                 return self.shared._launch(record,record['index'],recover=True)
             binding = self.store.read('bindings.json')[owner]
             profile = self.accounts.authenticated(binding['profile'])

@@ -121,8 +121,8 @@ def apply_event(state, event, payload):
     return state
 
 
-def safe_state(state):
-    return (state.get('turn') == 'quota' and not state.get('tools') and not state.get('subagents')
+def safe_state(state, *, allow_idle=False):
+    return (state.get('turn') in ({'quota','idle'} if allow_idle else {'quota'}) and not state.get('tools') and not state.get('subagents')
             and not state.get('background_tools') and not state.get('blocked') and not state.get('uncertain') and not state.get('error'))
 
 
@@ -234,13 +234,13 @@ def supervise(shared, record, owner, profile, native, args, launcher):
                         shared.validate(record)
                         control = store.read('control-' + conversation + '.json')
                         state = store.read('runtime-' + conversation + '.json')
-                        if control.get('owner') == owner and control.get('request') != state.get('request') and control.get('action') == 'stop':
+                        if control.get('owner') == owner and control.get('request') != state.get('request') and control.get('action') in {'stop','stop-idle'}:
                             # Freeze only our own child. PreToolUse hooks complete
                             # before tools start; active tools/subagents stay marked.
                             child.send_signal(signal.SIGSTOP)
                             time.sleep(0.05)
                             state = store.read('runtime-' + conversation + '.json')
-                            if safe_state(state):
+                            if safe_state(state,allow_idle=control.get('action')=='stop-idle'):
                                 update(store,conversation,request=control['request'],stop_result='stopping')
                                 # Completed turn, no active workers: terminate the
                                 # frozen parent without reopening a prompt race.
@@ -269,12 +269,15 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     store = conversation = owner = None
     try:
+        if '--account-profile' in argv:
+            from .simple import run_profile
+            return run_profile(argv)
         store = Profiles(Path(os.environ['THURBOX_ACCOUNTS_ROOT']))
         conversation = identifier(os.environ['THURBOX_ACCOUNTS_CONVERSATION'])
         owner = os.environ['THURBOX_SESSION']
         native = os.environ['THURBOX_ACCOUNTS_CLAUDE']
         profile_name = os.environ['THURBOX_ACCOUNTS_PROFILE']
-        accounts = Accounts(store,Claude(native),Thurbox())
+        accounts = Accounts(store,Claude(native),Thurbox([os.environ.get('THURBOX_ACCOUNTS_CLI','thurbox-cli')]))
         shared = Shared(accounts)
         if argv[:1] == ['--event']:
             return hook(store,shared,conversation,owner,argv[1])
@@ -288,6 +291,8 @@ def main(argv=None):
         if record.get('is_probe'):
             if record.get('proof') != shared.proof_contract(record['profiles']):
                 raise ValueError('Native proof identity/build changed')
+        elif record.get('kind') == 'single':
+            shared.validate(record)
         else:
             shared.require_proof(record['profiles'])
         profile = accounts.authenticated(profile_name)

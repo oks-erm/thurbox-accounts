@@ -7,7 +7,7 @@ from .desktop import Desktop
 
 OPERATIONS = {'pane-add','status','start','desktop-stop','desktop-start',
               'verify-shared','enable-shared','switch','recover-shared',
-              'mode-preview','mode-enable','mode-on','mode-off'}
+              'mode-preview','mode-enable','mode-on','mode-off','simple-preview','simple-confirm','sync-accounts'}
 
 
 def add(store, label):
@@ -44,8 +44,9 @@ def snapshot(accounts, session=None):
     if session:
         # Originals and stale owners map to their current guarded conversation.
         selected = accounts.thurbox.call('session','get',session)
+        single = records.get(session,{}).get('kind') == 'single'
         supported = (not selected.get('host') and selected.get('backend_type') in {None,'tmux','local:tmux'}
-                     and selected.get('agent') in {'claude','claude-accounts'})
+                     and (selected.get('agent') in {'claude','claude-accounts'} or single))
         record = next((r for r in records.values() if supported and ( r['conversation']==selected.get('agent_session_id')
                        or r.get('original_session')==session)),None)
         if record:
@@ -59,6 +60,10 @@ def snapshot(accounts, session=None):
                 row('unsupported',session,'Select a local Claude conversation in WSL to use switching mode.')
         row('current',current_id)
         row('indicator',*indicator(accounts,selected,data,records))
+        selected_record=records.get(session)
+        if selected_record and selected.get('agent_session_id')==selected_record['conversation']:
+            row('inline',session,selected_record['profiles'][selected_record['index']],selected_record.get('kind','shared'),
+                selected_record['phase'],'off' if selected_record.get('mode',{}).get('enabled') is False else 'on')
     for item in data['conversations']:
         row('conversation',item['id'],item['name'],item['profile'],
             'shared' if item['shared'] else 'single',item.get('next_profile',''),item['cwd'],
@@ -80,12 +85,13 @@ def indicator(accounts, selected, data, records):
     item = next((c for c in data['conversations'] if c['id'] == selected['id']), None)
     binding = accounts.profiles.read('bindings.json').get(selected['id'], {})
     record = records.get(selected['id'], {})
-    matched = local and selected.get('cwd') == (record or binding).get('cwd')
+    matched = local and selected.get('cwd') == (record or binding).get('primary_cwd',(record or binding).get('cwd'))
     if item and item['shared'] and item['phase'] != 'active':
         status = 'recovery needed'
     if item and item.get('profile') and matched:
         native = selected.get('agent_session_id')
-        confirmed = (agent == 'claude-accounts' and native and native == record.get('conversation')
+        confirmed = (record.get('kind')=='single' and agent==record.get('source_agent') and native and native==record.get('conversation')
+                     or agent == 'claude-accounts' and native and native == record.get('conversation')
                      or agent == 'claude' and native and native == binding.get('agent_session_id'))
         if confirmed:
             label = next((p['label'] for p in data['profiles'] if p['name'] == item['profile']), item['profile'])
@@ -95,6 +101,14 @@ def indicator(accounts, selected, data, records):
 
 
 def receipt(action, value):
+    if action == 'simple-preview':
+        def encoded(*values): return '\t'.join(quote(str(v),safe='') for v in values)
+        lines=[encoded('switch-plan',value['id'],value['session'],value['source_profile'],value['target'],
+                       'ready' if value['proof_ready'] else 'missing','approved' if value['approved'] else 'consent',value['name'])]
+        for p in value['accounts']: lines.append(encoded('switch-account',p['name'],p['label'],p['email'],p.get('orgId','Organization not reported')))
+        return '\n'.join(lines)
+    if action == 'simple-confirm': return value.get('notice') or 'Switched to ' + value['profile'] + '. Continue in your conversation.'
+    if action == 'sync-accounts': return 'Accounts are available in New session (Ctrl+N).'
     if action == 'mode-preview':
         def encoded(*values): return '\t'.join(quote(str(v),safe='') for v in values)
         lines = [encoded('mode-plan',value['id'],value['session'],value['conversation'],value['name'],

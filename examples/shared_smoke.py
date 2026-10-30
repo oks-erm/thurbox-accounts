@@ -13,6 +13,7 @@ import uuid
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--simple',action='store_true',help='Named account creation and inline idle switching')
     parser.add_argument('--mode',action='store_true',help='Adopt an ordinary source and exercise conversation mode Off/On')
     parser.add_argument('--desktop',action='store_true',help='Also exercise desktop listing/capture/literal send')
     parser.add_argument('--thurbox-cli',default='thurbox-cli')
@@ -87,16 +88,50 @@ while True:
         store.add('enterprise-b')
         # Synthetic fixture proof is bound to this synthetic executable only.
         store.write('shared-proof.json',shared.proof_contract(['enterprise-a','enterprise-b']))
-        if args.mode:
+        if args.simple:
+            from thurbox_accounts.agent_install import register_profiles
+            from thurbox_accounts.simple import Simple, agent_name
+            for name in ('enterprise-a','enterprise-b'): service.status(name)
+            register_profiles(service,Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent')
+            source=tb.call('session','create','--name','synthetic-named','--repo-path',str(root),
+                '--agent',agent_name(store.get('enterprise-a')),'--on-existing','fail')
+        elif args.mode:
             origin=root/'untracked-native'; origin.mkdir(mode=0o700)
             source=tb.call('session','create','--name','synthetic-existing','--repo-path',str(root),
                 '--agent','claude','--env','CLAUDE_CONFIG_DIR='+str(origin),'--on-existing','fail')
         else:
             source = service.start('enterprise-a',root,'synthetic-source')
         sessions.append(source['id'])
-        wait(lambda: tb.call('session','get',source['id']).get('transcript_path'))
-        tb.call('session','stop',source['id'])
-        if args.mode:
+        if args.simple:
+            wait(lambda: store.read(shared.key(source['agent_session_id'])))
+            wait(lambda: Simple(service).transcript(shared.load(source['agent_session_id'])))
+        else: wait(lambda: tb.call('session','get',source['id']).get('transcript_path'))
+        if not args.simple: tb.call('session','stop',source['id'])
+        if args.simple:
+            conversation=source['agent_session_id']
+            wait(lambda: shared._runtime(conversation).get('turn')=='quota')
+            before=shared._runtime(conversation)['native_pid']
+            # An explicit idle checkpoint, through the actual native hook bridge.
+            native_env=dict(os.environ,THURBOX_ACCOUNTS_ROOT=str(store.root),THURBOX_ACCOUNTS_CONVERSATION=conversation,
+                THURBOX_SESSION=source['id'],THURBOX_ACCOUNTS_CLAUDE=str(native),THURBOX_ACCOUNTS_PROFILE='enterprise-a',THURBOX_ACCOUNTS_CLI=binary)
+            def simple_event(event,**payload):
+                result=subprocess.run([str(Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent'),'--event',event],
+                    env=native_env,input=json.dumps(dict(session_id=conversation,hook_event_name=event,**payload)),capture_output=True,text=True,timeout=15)
+                assert result.returncode==0,result.stderr
+            simple_event('Stop',background_tasks=[])
+            simple_event('PreToolUse',tool_use_id='busy-shell',tool_name='Bash',tool_input={'run_in_background':True})
+            simple_event('PostToolUse',tool_use_id='busy-shell',tool_name='Bash',tool_response={'backgroundTaskId':'busy-task'})
+            simple_event('Stop')
+            plan=Simple(service).preview(source['id'],'enterprise-b')
+            try: Simple(service).confirm(plan['id'],consent=True)
+            except ValueError as error: assert 'Background' in str(error),str(error)
+            else: raise AssertionError('Named busy source was switched')
+            assert shared._runtime(conversation)['native_pid']==before; os.kill(before,0)
+            simple_event('Stop',background_tasks=[])
+            plan=Simple(service).preview(source['id'],'enterprise-b')
+            current=Simple(service).confirm(plan['id'],consent=True)
+            assert current['profile']=='enterprise-b'
+        elif args.mode:
             from thurbox_accounts.mode import Mode
             from thurbox_accounts.pane import snapshot
             mode=Mode(service)
@@ -135,10 +170,13 @@ while True:
             current = shared.enroll(source['id'],['enterprise-a','enterprise-b'],consent=True)
         conversation = current['conversation']
         sessions.append(current['session'])
-        for target in ('enterprise-b','enterprise-a'):
+        for target in (('enterprise-a',) if args.simple else ('enterprise-b','enterprise-a')):
             wait(lambda: shared._runtime(conversation).get('turn') == 'quota')
             assert not writer_available(store,conversation)
-            current = shared.switch(conversation)
+            if args.simple:
+                plan=Simple(service).preview(current['session'],target)
+                current=Simple(service).confirm(plan['id'],consent=True)
+            else: current = shared.switch(conversation)
             sessions.append(current['session'])
             assert current['profile'] == target
             row = tb.call('session','get',current['session'])
@@ -179,7 +217,7 @@ while True:
             same_conversation_uuid=True,canonical_history=True,separate_profile_env=True,
             sequential_a_b_a=True,stale_writer_rejected=True,desktop_adapter_verified=args.desktop,
             ordinary_adoption_verified=args.mode,mode_off_on_verified=args.mode,
-            background_switch_refusal_verified=args.mode,artifacts=str(root))
+            background_switch_refusal_verified=args.mode or args.simple,named_creation_verified=args.simple,inline_idle_switch_verified=args.simple,artifacts=str(root))
         atomic_write(root/'summary.json',dumps(summary))
         print(dumps(summary))
     finally:

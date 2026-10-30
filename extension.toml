@@ -79,3 +79,6 @@ path = "thurbox_accounts/mode.py"
 
 [[files]]
 path = "thurbox_accounts/ui/account_status.lua"
+
+[[files]]
+path = "thurbox_accounts/simple.py"

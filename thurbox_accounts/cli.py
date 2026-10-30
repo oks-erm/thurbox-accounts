@@ -41,6 +41,11 @@ def parser():
         command.add_argument('--session')
         if action == 'switch':
             command.add_argument('--expected-profile')
+    commands.add_parser('sync-accounts')
+    simple_preview=commands.add_parser('simple-preview')
+    simple_preview.add_argument('--session',required=True); simple_preview.add_argument('--to',required=True)
+    simple_confirm=commands.add_parser('simple-confirm')
+    simple_confirm.add_argument('token'); simple_confirm.add_argument('--consent',action='store_true')
     pane_state = commands.add_parser('pane-state')
     pane_state.add_argument('--session')
     mode_preview = commands.add_parser('mode-preview',help='Review switching mode for an existing stopped local conversation')
@@ -106,6 +111,15 @@ def run(args):
             from .thurbox import strict_json
             print(receipt(operation[0],strict_json(output.getvalue())))
         return 0
+    if verb == 'sync-accounts':
+        from .agent_install import register_profiles
+        print(dumps(register_profiles(service,Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent')))
+        return 0
+    if verb.startswith('simple-'):
+        from .simple import Simple
+        simple=Simple(service)
+        value=simple.preview(args.session,args.to) if verb=='simple-preview' else simple.confirm(args.token,consent=args.consent)
+        print(dumps(value)); return 0
     if verb.startswith('mode-'):
         from .mode import Mode
         mode = Mode(service)
@@ -174,6 +188,9 @@ def run(args):
     else:
         from .accounts_ui import install
         result = install(args.thurbox_cli, profiles.root, args.claude)
+    if verb in {'status','login'} and result.get('loggedIn'):
+        from .agent_install import register_profiles
+        register_profiles(service,Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent')
     if args.text and verb == 'list':
         print('\n'.join(profile['name'] + ' — ' + profile['label'] + ' — ' +
               profile.get('identity', {}).get('email', 'login required') for profile in result['profiles']) or 'No profiles. Click Add account in Accounts or run thurbox-accounts add NAME.')

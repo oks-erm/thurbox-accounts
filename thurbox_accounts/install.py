@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import sys
 
-from .agent_install import register
+from .agent_install import register, register_profiles
 from .runtime import execute
 from .thurbox import Thurbox, strict_json
 
@@ -51,6 +51,8 @@ def install_checkout(command, accounts_dir, claude, bin_dir, *, source=None):
         stage = 'Register guarded account agent'
         print('[3/4] Register guarded account agent…', file=sys.stderr, flush=True)
         agent = register(thurbox,home / 'bin/thurbox-accounts-agent')
+        from .accounts import Accounts, Profiles, Claude
+        register_profiles(Accounts(Profiles(accounts_dir),Claude(claude),thurbox),home/'bin/thurbox-accounts-agent')
 
         stage = 'Link account command'
         print('[4/4] Link account command…', file=sys.stderr, flush=True)

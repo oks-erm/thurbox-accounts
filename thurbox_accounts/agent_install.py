@@ -40,3 +40,40 @@ def register(thurbox, launcher):
     shutil.copy2(path,backup)
     atomic_write(path,text.rstrip()+'\n'+block)
     return dict(agent=AGENT,added=True,backup=str(backup))
+
+
+def register_profiles(accounts, launcher):
+    """Add named account choices without touching native/default definitions."""
+    from .simple import agent_name
+    if not launcher.is_file(): raise ValueError('Named launcher is missing')
+    tb=accounts.thurbox
+    tb.call('agent','launch-args','claude')
+    path=Path(tb.call('config','show').get('paths',{}).get('agents_toml',''))
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+        raise ValueError('Cannot safely locate the Thurbox agent registry')
+    command=tb.command[0] if getattr(tb,'command',None) else 'thurbox-cli'
+    text=path.read_text(); existing=tomllib.loads(text).get('agents',[]); additions=[]; names=[]
+    for key in accounts.profiles.read('profiles.json'):
+        p=accounts.profiles.get(key)
+        if not p.get('identity'): continue
+        name=agent_name(p); names.append(name)
+        definition=dict(name=name,command=str(launcher),args=['--account-profile',key,'--account-root',str(accounts.profiles.root),
+                        '--account-claude',accounts.claude.executable,'--account-cli',command],
+                        resume_args=['--resume','{id}'],new_session_args=['--session-id','{id}'],
+                        additional_dir_args=['--add-dir','{dir}'],hook_schema='claude')
+        old=next((a for a in existing if a.get('name')==name),None)
+        if old:
+            expected=dict(definition)
+            native_hooks=path.parent/'hooks/claude.json'
+            if old.get('args')==definition['args']+['--settings',str(native_hooks)]:
+                from .guard import guarded_settings
+                guarded_settings(['--settings',str(native_hooks)],launcher)
+                expected['args']=old['args']
+            if any(old.get(k)!=v for k,v in expected.items()):
+                raise ValueError('Existing named account agent has custom edits; preserved: '+name)
+        else:
+            additions.append('\n[[agents]]\n'+'\n'.join(k+' = '+json.dumps(v,ensure_ascii=False) for k,v in definition.items())+'\n')
+    if additions:
+        backup=path.with_name(path.name+'.accounts-backup.'+str(time.time_ns())); shutil.copy2(path,backup)
+        atomic_write(path,text.rstrip()+'\n'+''.join(additions))
+    return dict(agents=names,added=len(additions))
