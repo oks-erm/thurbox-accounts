@@ -36,6 +36,10 @@ def snapshot(accounts, session=None):
         row('account',profile['name'],profile['label'],profile['email'],
             'saved' if profile['email'] != 'Login required' else 'login')
     records = Desktop(accounts).records()
+    # Older records did not preserve a confirmed index during failed switches.
+    for item in data['conversations']:
+        if item['shared'] and item['phase'] != 'active' and records.get(item['id'],{}).get('mode',{}).get('active_index') is None:
+            item['profile'] = ''
     current_id = session
     if session:
         # Originals and stale owners map to their current guarded conversation.
@@ -54,6 +58,7 @@ def snapshot(accounts, session=None):
             else:
                 row('unsupported',session,'Select a local Claude conversation in WSL to use switching mode.')
         row('current',current_id)
+        row('indicator',*indicator(accounts,selected,data,records))
     for item in data['conversations']:
         row('conversation',item['id'],item['name'],item['profile'],
             'shared' if item['shared'] else 'single',item.get('next_profile',''),item['cwd'],
@@ -64,6 +69,29 @@ def snapshot(accounts, session=None):
     if proof:
         row('proof',','.join(p['name'] for p in proof.get('profiles',[])))
     return '\n'.join(lines)
+
+
+def indicator(accounts, selected, data, records):
+    """Read-only label for the actual selected session, never the login picker."""
+    agent = selected.get('agent') or 'unknown'
+    status = 'stopped' if selected.get('stopped') else 'running'
+    label = 'default' if agent == 'codex' else 'unverified'
+    local = not selected.get('host') and selected.get('backend_type') in {None, 'tmux', 'local:tmux'}
+    item = next((c for c in data['conversations'] if c['id'] == selected['id']), None)
+    binding = accounts.profiles.read('bindings.json').get(selected['id'], {})
+    record = records.get(selected['id'], {})
+    matched = local and selected.get('cwd') == (record or binding).get('cwd')
+    if item and item['shared'] and item['phase'] != 'active':
+        status = 'recovery needed'
+    if item and item.get('profile') and matched:
+        native = selected.get('agent_session_id')
+        confirmed = (agent == 'claude-accounts' and native and native == record.get('conversation')
+                     or agent == 'claude' and native and native == binding.get('agent_session_id'))
+        if confirmed:
+            label = next((p['label'] for p in data['profiles'] if p['name'] == item['profile']), item['profile'])
+            if item['shared'] and item['phase'] != 'active':
+                status = 'last confirmed (recovery needed)'
+    return selected['id'], agent, label, status
 
 
 def receipt(action, value):

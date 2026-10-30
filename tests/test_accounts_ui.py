@@ -59,3 +59,35 @@ class UiInstallTests(unittest.TestCase):
             self.assertEqual((profiles.root / 'profiles.json').read_bytes(), metadata)
             self.assertIn('bin/thurbox-accounts', pane.read_text())
             self.assertNotIn('bin/thurbox-loop', pane.read_text())
+
+    def test_status_strip_is_delivered_without_layout_edits_and_custom_edits_are_preserved(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve(); (root/'plugins').mkdir()
+            (root/'layout.lua').write_text('unchanged')
+            with patch('thurbox_accounts.accounts_ui.Thurbox') as adapter:
+                adapter.return_value.call.side_effect=lambda *args: {'dir':str(root)} if args==('plugin','dir') else {'ok':True}
+                result=install('thurbox-cli',root/'data','claude')
+                strip=Path(result['indicator'])
+                self.assertIn('strip = true',strip.read_text())
+                self.assertIn('size = { len = 1 }',strip.read_text())
+                strip.write_text(strip.read_text()+'\n-- custom')
+                pane=Path(result['pane']); before=pane.read_bytes()
+                with self.assertRaisesRegex(ValueError,'custom edits'):
+                    install('different-cli',root/'data','claude')
+                self.assertEqual(pane.read_bytes(),before)
+                self.assertTrue(strip.read_text().endswith('-- custom'))
+                self.assertEqual((root/'layout.lua').read_text(),'unchanged')
+
+    def test_custom_status_pane_with_starter_comment_is_not_owned(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve(); (root/'plugins').mkdir()
+            (root/'layout.lua').write_text('unchanged')
+            strip=root/'plugins/91_account_status.lua'
+            custom='-- A starting point.\nreturn {name="my-custom-pane"}\n'
+            strip.write_text(custom)
+            with patch('thurbox_accounts.accounts_ui.Thurbox') as adapter:
+                adapter.return_value.call.side_effect=lambda *args: {'dir':str(root)} if args==('plugin','dir') else {'ok':True}
+                with self.assertRaisesRegex(ValueError,'custom edits'):
+                    install('thurbox-cli',root/'data','claude')
+            self.assertEqual(strip.read_text(),custom)
+            self.assertFalse((root/'plugins/90_accounts.lua').exists())

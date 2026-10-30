@@ -143,3 +143,17 @@ Artifacts: `/private/tmp/tbx-shared-smoke-xhgx742s/summary.json`.
 A real Claude CLI cold status probe against an empty private temporary config
 returned signed-out status and the expected config-directory schema; no login or
 model request was made. Actual Enterprise SSO and WSL execution remain unverified.
+
+## Account strip 0.4.1
+
+- 88 Python unit tests pass, including stale bindings, last-confirmed mode records,
+  unknown failed legacy switches and preservation of custom status panes.
+- Compile checks and `git diff --check` pass.
+- `examples/account_status_smoke.py` uses a real isolated Thurbox 2.75.2 Lua VM/TUI
+  with read-only fixture data. The strip occupies one visible row while Agent is
+  focused; Codex/default, A→B labels, empty selection, loading and failure pass.
+- Existing `examples/guided_pane_smoke.py` passes with the additional strip.
+- Fresh local install, repeat install and live Mac plugin check pass. Existing
+  generic raw-on_click warnings remain in Accounts and the custom Sessions pane.
+- No authentication, model calls, capability grants or real Enterprise quota
+  switches are exercised. WSL is not available on the connected Mac.

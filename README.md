@@ -90,6 +90,20 @@ To update: rerun the extension installer, then `thurbox-accounts desktop-install
 Close and reopen the companion after updating. The native app pins the backend
 paths from its build, so rerun that command if Python/Claude/Thurbox paths change.
 
+## See the current account
+
+A one-line **Account:** strip stays visible above the bottom buttons while you
+work. It follows the selected conversation, independently of the account selected
+in the Accounts pane for new conversations. Tracked Claude conversations show the
+account name; Codex shows **default**. An untracked Claude login shows
+**unverified**, and a failed switch shows the **last confirmed** account.
+
+After updating, press **F10**. For Claude labels, allow **Run** for
+**account-status** in **Settings → Interface** once. The strip only reads local
+metadata; it never signs in or sends a model request. Codex needs no permission.
+The strip uses Thurbox's automatic strips layout; custom layouts that removed
+that loop must restore it before the strip can appear (`plugin check` explains).
+
 ## Use the Accounts pane
 
 1. Press **F7**. Click **Open Settings** if the pane asks for its one-time permissions.

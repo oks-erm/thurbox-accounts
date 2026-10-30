@@ -110,3 +110,15 @@ picker. Finish work and explicitly park the original before setup. One initial
 snapshot preserves its original files; subsequent switches share canonical UUID
 history. On/Off is per conversation and Off is enforced in the CLI too.
 Switching mode is separate from automatic rotation; switching remains one click.
+
+## Visible account label (0.4.1)
+
+`account-status` adds a single row above the footer, including while Agent is
+focused. It follows the selected session, not the login picker. Codex says
+`Account: default`; managed Claude shows its profile label. Untracked Claude is
+`unverified`. Recovery retains the last confirmed account label.
+
+Update/install, press F10, then allow Run for **account-status** in Settings →
+Interface once for Claude metadata. Refresh never checks native authentication or
+sends context. The installer preserves custom panes and the layout. Layouts need
+the bundled automatic strips loop; `thurbox-cli plugin check` detects its absence.

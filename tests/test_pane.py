@@ -88,3 +88,44 @@ class PaneTests(unittest.TestCase):
         with patch.object(self.service.thurbox,'call',side_effect=call): output=snapshot(self.service,session='codex')
         self.assertIn('unsupported\tcodex',output)
         self.assertNotIn('conversation\tcodex',output)
+
+    def test_indicator_default_codex_and_unverified_claude_without_auth(self):
+        from thurbox_accounts.pane import snapshot
+        for agent, expected in [('codex','default'),('claude','unverified'),('claude-accounts','unverified')]:
+            row=dict(id='selected',name='Current',agent=agent,cwd='/project',backend_type='tmux')
+            with patch.object(self.service.thurbox,'call',side_effect=lambda *args: {'sessions':[row]} if args[:2]==('session','list') else row), patch.object(self.service.claude,'status',side_effect=AssertionError('no auth on refresh')):
+                output=snapshot(self.service,'selected')
+            status=[list(map(unquote,line.split('\t'))) for line in output.splitlines() if line.startswith('indicator\t')]
+            self.assertEqual(status,[['indicator','selected',agent,expected,'running']])
+
+    def test_indicator_uses_confirmed_conversation_profile_and_rejects_stale_binding(self):
+        from thurbox_accounts.pane import snapshot
+        self.store.add('a','Enterprise A'); self.store.add('b','Enterprise B')
+        row=dict(id='selected',name='Current',agent='claude',cwd='/project',backend_type='tmux',agent_session_id='native-a')
+        self.store.write('bindings.json',{'selected':dict(profile='a',cwd='/project',agent_session_id='native-a')})
+        def call(*args): return {'sessions':[row]} if args[:2]==('session','list') else row
+        with patch.object(self.service.thurbox,'call',side_effect=call):
+            self.assertIn('indicator\tselected\tclaude\tEnterprise%20A\trunning',snapshot(self.service,'selected'))
+            row['agent_session_id']='replacement'
+            self.assertIn('indicator\tselected\tclaude\tunverified\trunning',snapshot(self.service,'selected'))
+
+    def test_indicator_failed_switch_names_last_confirmed_account(self):
+        from thurbox_accounts.pane import snapshot
+        self.store.add('a','Enterprise A'); self.store.add('b','Enterprise B')
+        row=dict(id='selected',name='Current',agent='claude-accounts',cwd='/project',backend_type='tmux',agent_session_id='native-a',stopped=True)
+        self.store.write('shared-native-a.json',dict(conversation='native-a',allowed_session='selected',cwd='/project',profiles=['a','b'],index=1,phase='failed',mode=dict(active_index=0)))
+        def call(*args): return {'sessions':[row]} if args[:2]==('session','list') else row
+        with patch.object(self.service.thurbox,'call',side_effect=call):
+            self.assertIn('indicator\tselected\tclaude-accounts\tEnterprise%20A\tlast%20confirmed%20%28recovery%20needed%29',snapshot(self.service,'selected'))
+
+    def test_legacy_failed_switch_does_not_claim_attempted_account_was_confirmed(self):
+        from thurbox_accounts.pane import snapshot
+        self.store.add('a','Enterprise A'); self.store.add('b','Enterprise B')
+        row=dict(id='selected',name='Current',agent='claude-accounts',cwd='/project',backend_type='tmux',agent_session_id='native-a',stopped=True)
+        self.store.write('shared-native-a.json',dict(conversation='native-a',allowed_session='selected',cwd='/project',profiles=['a','b'],index=1,phase='failed'))
+        def call(*args): return {'sessions':[row]} if args[:2]==('session','list') else row
+        with patch.object(self.service.thurbox,'call',side_effect=call):
+            output=snapshot(self.service,'selected')
+        self.assertIn('indicator\tselected\tclaude-accounts\tunverified\trecovery%20needed',output)
+        conversation=next(line.split('\t') for line in output.splitlines() if line.startswith('conversation\t'))
+        self.assertEqual(conversation[3],'')

@@ -52,6 +52,7 @@ local function model()
     elseif f[1] == "conversation" and (#f == 10 or #f == 12) then
       m.conversations[#m.conversations + 1] = { id = f[2], name = f[3], profile = f[4], shared = f[5] == "shared",
         next = f[6], cwd = f[7], stopped = f[8] == "stopped", conversation = f[9], phase = f[10], mode = f[11] or "on", external = f[12] == "external" }
+    elseif f[1] == "indicator" then m.indicator = "Account: " .. f[4] .. " | " .. f[5]
     elseif f[1] == "current" then m.current = f[2]
     elseif f[1] == "unsupported" then m.unsupported = f[3]
     elseif f[1] == "proof" then m.proof = f[2] end
@@ -278,6 +279,7 @@ return {
     else
       run(data_key(), BASE .. " pane-state" .. (store.selected and " --session " .. quote(store.selected) or ""), { machine = "local", timeout = 30, ttl = 3 })
       local m = model(); local p, c = account(m), conversation(m)
+      if m.indicator then say(m.indicator) end
       if not m.ready then
         say(m.error and "Couldn't connect to the account helper installed in this terminal." or "Loading your accounts…")
         if m.error then
@@ -360,7 +362,7 @@ return {
             if #m.conversations > 4 then click("More conversations", "more-conversations") end
             if c then
               say("Conversation: " .. c.name)
-              say((c.shared and c.phase ~= "active" and "Last confirmed account: " or "Current account: ") .. (c.external and "verified during setup" or label(m, c.profile)) .. " | " .. (c.stopped and "Stopped" or "Running"))
+              say((c.shared and c.phase ~= "active" and "Last confirmed account: " or "Current account: ") .. ((c.external or c.profile == "") and "unverified" or label(m, c.profile)) .. " | " .. (c.stopped and "Stopped" or "Running"))
               say("Account switching: " .. (c.shared and c.phase ~= "active" and "Needs recovery" or c.shared and c.mode ~= "off" and "On" or "Off"))
               if c.shared and c.phase == "active" then click(c.mode == "off" and "Turn switching On" or "Turn switching Off", c.mode == "off" and "mode-on" or "mode-off") end
               if c.shared and c.mode ~= "off" and c.phase == "active" and c.next ~= "" then click("Switch to " .. label(m, c.next), "switch") end

@@ -142,3 +142,15 @@ or the main native Stop registry snapshot can discharge them; missing/unknown
 completion remains a blocker for switching and recovery. Never clear this evidence
 because the parent stopped or the account hit quota. The optional Stop task registry
 is documented at https://code.claude.com/docs/en/hooks#stop-input .
+
+## Account strip (0.4.1)
+
+`ui/account_status.lua` uses `strip=true` and the bundled automatic strips loop;
+never overwrite a custom layout. `accounts_ui.py` preflights both owned Lua files
+before delivery and preserves unknown edits. Run capability is separately granted
+by the user for this strip. Codex's default label requires no capability.
+`pane.py` emits an indicator bound to the actual selected session's native UUID,
+agent, local backend and cwd, independent of the login picker or owner mapping.
+Never authenticate during refresh. Unknown Claude accounts remain unverified;
+failed switches name the last confirmed profile. Validate with
+`python3.11 examples/account_status_smoke.py` and the guided pane smoke.
