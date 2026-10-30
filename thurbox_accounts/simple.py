@@ -1,13 +1,11 @@
 """Named guarded starts and explicit inline account switching; native owns auth."""
 import argparse
-import contextlib
-import hashlib
 import os
 from pathlib import Path
 import time
 import uuid
 
-from .accounts import Accounts, Claude, Profiles, account_env, private_dir
+from .accounts import Accounts, Claude, Profiles, private_dir
 from .shared import Shared, identifier, real_directory
 from .thurbox import Thurbox
 
@@ -51,7 +49,15 @@ class Simple:
         row=self.tb.call('session','get',owner)
         if row.get('agent') != agent_name(profile) or row.get('agent_session_id') != native:
             raise ValueError('Named profile launch identity or UUID changed')
-        record=dict(kind='single',conversation=native,profiles=[name],identity=profile['identity'],
+        directories=[]
+        for i,arg in enumerate(args):
+            if arg=='--add-dir':
+                if i+1>=len(args): raise ValueError('Missing additional directory')
+                value=Path(args[i+1]).expanduser()
+                value=(cwd/value).resolve(strict=True) if not value.is_absolute() else value.resolve(strict=True)
+                if not value.is_dir(): raise ValueError('Additional directory must be a directory')
+                directories.append(str(value))
+        record=dict(native_dirs=directories,kind='single',conversation=native,profiles=[name],identity=profile['identity'],
                     source_agent=agent_name(profile),cwd=str(cwd),primary_cwd=row.get('cwd'),
                     transcript=str(self.store.root/'shared'/native/'main.jsonl'),
                     index=0,phase='active',allowed_session=owner,reservation='',name=row.get('name',owner))
@@ -61,17 +67,19 @@ class Simple:
             if existing:
                 if existing.get('kind')!='single' or existing.get('allowed_session')!=owner:
                     raise ValueError('This owner was replaced by a shared session; use the current conversation')
-                if any(existing.get(k)!=record.get(k) for k in record):
+                if any(existing.get(k)!=record.get(k) for k in record if k!='name'):
                     raise ValueError('Named session profile or identity changed')
                 self.validate_single(existing)
+                if existing.get('name')!=record['name']:
+                    existing['name']=record['name']; self.shared.save(existing)
                 return existing
             self.validate_single(record)
             with self.store.lock():
                 bindings=self.store.read('bindings.json')
-                if owner in bindings:
-                    raise ValueError('Session already has an account binding')
-                bindings[owner]=dict(profile=name,identity=profile['identity'],cwd=row['cwd'],
-                                     agent_session_id=native,agent=record['source_agent'])
+                expected=dict(profile=name,identity=profile['identity'],cwd=row['cwd'],agent_session_id=native,agent=record['source_agent'])
+                if owner in bindings and bindings[owner]!=expected:
+                    raise ValueError('Session already has a different account binding')
+                bindings[owner]=expected
                 self.store.write('bindings.json',bindings)
                 self.shared.save(record)
         return record
@@ -127,9 +135,16 @@ class Simple:
         if target==current: raise ValueError('This conversation already uses that account')
         names=list(record['profiles'])
         if target not in names: names.append(target)
+        if record.get('kind')=='single':
+            prepared=self.store.read('shared-proof.json').get('profiles',[])
+            prepared_names=[p['name'] for p in prepared]
+            if len(prepared_names)==len(names) and set(prepared_names)==set(names): names=prepared_names
         contract=self.shared.proof_contract(names)
+        if record.get('kind')=='single' and not self.shared.has_proof(contract):
+            reverse=list(reversed(names)); reverse_contract=self.shared.proof_contract(reverse)
+            if self.shared.has_proof(reverse_contract): names,contract=reverse,reverse_contract
         for p in names: self.accounts.check_launch(self.store.get(p))
-        snapshot={k:record.get(k) for k in ('conversation','allowed_session','kind','cwd','index','profiles','mode')}
+        snapshot={k:record.get(k) for k in ('conversation','allowed_session','kind','cwd','primary_cwd','native_dirs','source_agent','identity','index','profiles','mode')}
         return row,record,current,names,contract,snapshot
 
     def preview(self, session, target):
@@ -138,9 +153,15 @@ class Simple:
         plan=dict(id=str(uuid.uuid4()),expires_at=time.time()+300,session=row['id'],target=target,
                   conversation=record['conversation'],name=record.get('name',row.get('name',row['id'])),
                   source_profile=current,profiles=names,contract=contract,snapshot=snapshot,
-                  proof_ready=self.store.read('shared-proof.json')==contract,approved=approved,
+                  proof_ready=self.shared.has_proof(contract),approved=approved,
                   accounts=[dict(name=p['name'],label=self.store.get(p['name'])['label'],**p['identity']) for p in contract['profiles']])
         self.store.write('simple-plan-'+plan['id']+'.json',plan)
+        return plan
+
+    def select(self, session, target):
+        plan=self.preview(session,target)
+        if plan['approved'] and plan['proof_ready']:
+            return dict(completed=True,**self.confirm(plan['id'],consent=True))
         return plan
 
     def confirm(self, token, *, consent=False):
@@ -165,7 +186,7 @@ class Simple:
                 self.shared._pause(record,allow_idle=True)
                 if record.get('kind')=='single':
                     result=self.shared.enroll(row['id'],names,consent=True,launch=False,
-                        mode=dict(enabled=True,active_index=0),name=record.get('name'),guarded_source=True,transition_held=True)
+                        mode=dict(enabled=True,active_index=names.index(current)),name=record.get('name'),guarded_source=True,transition_held=True)
                     return self.shared._launch(result,names.index(plan['target']))
                 if names!=record['profiles']:
                     self._extend(record,names,contract)

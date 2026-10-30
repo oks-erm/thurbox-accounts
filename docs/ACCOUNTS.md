@@ -1,7 +1,7 @@
 # Shared one-click switching
 
 For sequential account use with one local conversation, follow the
-[README setup and switching guide](../README.md#one-time-account-setup).
+[short colleague guide](QUICKSTART.md).
 The handoff commands below are the older explicit snapshot/fork workflow.
 They remain available but are not used by shared switching.
 
@@ -22,8 +22,6 @@ thurbox-accounts login company-a
 thurbox-accounts status company-a
 thurbox-accounts add company-b --label 'Company B'
 thurbox-accounts login company-b
-thurbox-accounts start company-a --repo /absolute/project --name project-a
-thurbox-accounts start company-b --repo /absolute/project --name project-b
 ```
 
 Login opens the official SSO flow. Check the email/organization reported by
@@ -38,22 +36,27 @@ in the browser. The CLI cannot independently certify the account's Enterprise ti
 thurbox-accounts ui-install
 ```
 
-Press **F7** to open/leave Accounts. In **Ctrl+, → ]**, select Accounts and
-grant its **run/program** capabilities yourself. Installation never grants them.
-Click **Add account**, give it a friendly name, then **Log in**. Complete native
-SSO and press **F7** to return. Repeat for each account. Open **Conversations**
-to create/open conversations or select **Turn switching mode On…** for the
-current existing conversation. Select
-accounts in switching order; **Check compatibility** and **Review and enable mode…**
-each show an explicit confirmation. Later use the named **Switch to** button.
-Use clicks, or Tab/Enter. No profile IDs or Alt shortcuts are required.
-Enlarge the pane if the sharing confirmation cannot fit.
+Use the [colleague guide](QUICKSTART.md) for the normal flow: sign in through
+**F7**, create a named account session through **Ctrl+N**, then click **Switch account**
+in its conversation strip. Accounts also offers a separately confirmed compatibility
+check before allowance is exhausted. It never silently runs model requests.
 
-Windows users must run the extension and Thurbox in the same WSL environment.
+The installer delivers the account panes plus a checked adapter for the stock
+New session picker. It backs up recognized files, refuses custom edits, and
+preserves layouts, shared libraries and unrelated agent definitions. Named choices
+are registered after a successful login/check and appear through native registry
+reload. New session needs Sessions permission; Accounts needs Run/Program, and
+account-status/account-switch need Run, granted by the user in Interface settings.
 
-The pane shares the existing center slot. It preserves the layout and shared
-libraries. A replaced starter/previous generated pane is backed up beside it;
-unknown custom panes are refused. Use Interface settings to disable the pane.
+New named sessions are guarded from their first turn. First switching approval is
+specific to the source/target accounts and organizations. No terminal stop command
+or separate mode setup is required. Idle switching waits for an independent native
+idle notification; the guard refuses tools/background jobs/scheduled work/unknown
+completion. Existing unguarded sessions retain the advanced mode workflow below.
+
+The older `start` CLI creates ordinary account-bound sessions, not the new Ctrl+N
+flow. Snapshot/fork handoff commands below remain available for advanced use.
+Windows users must run everything inside the same WSL environment.
 
 ## Continue an existing conversation under another account
 

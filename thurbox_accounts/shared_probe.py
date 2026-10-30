@@ -128,7 +128,7 @@ def verify(accounts, names):
             raise ValueError('Native post-compaction/worker lifecycle proof failed')
         if shared.proof_contract(names) != contract:
             raise ValueError('Account identity or native build changed during verification')
-        store.write('shared-proof.json',contract)
+        shared.remember_proof(contract)
         return dict(verified=True,profiles=names,same_uuid=True,append=True,sidecars=True,
                     compaction=True,original_account_resume=True,evidence=str(folder))
     finally:

@@ -157,3 +157,36 @@ model request was made. Actual Enterprise SSO and WSL execution remain unverifie
   generic raw-on_click warnings remain in Accounts and the custom Sessions pane.
 - No authentication, model calls, capability grants or real Enterprise quota
   switches are exercised. WSL is not available on the connected Mac.
+
+## Simple session flow 0.5.0
+
+Validated on the connected Mac with Thurbox 2.76.2:
+
+- 108 Python 3.11 unit tests pass; compileall and `git diff --check` pass.
+- Independent review findings (renames, duplicate labels, Stop-hook continuation,
+  permission routing) were fixed with regression tests and re-reviewed.
+- `examples/inline_switch_smoke.py`: real Ctrl+N, clean named-account choices,
+  actual denied-Sessions dialog → Settings → cancel, inline chooser, height-gated
+  sharing consent, separate paid-check review, stale selection and cancellation.
+  Receipts and create dispatch are synthetic; no trust/capabilities are granted.
+  Artifacts: `/private/tmp/tbx-inline-skdrugew`.
+- Existing guided Accounts and account-strip real TUI smokes pass.
+- `examples/shared_smoke.py --simple --desktop`: real local tmux + synthetic Claude,
+  CLI-auth-status-driven named-agent registration, startup without a cross-account
+  proof, guarded idle A→B→A with one UUID/canonical history, background task refusal
+  preserving the source PID, stale-owner refusal and desktop adapter checks.
+  Artifacts: `/private/tmp/tbx-shared-smoke-pio_55zj`.
+- Legacy `--mode --desktop` synthetic tmux regression passes:
+  `/private/tmp/tbx-shared-smoke-jfenswga`.
+- Fresh install/rerun is idempotent with the creation adapter and switch dialog:
+  `/private/tmp/tbx-simple-install-3l5lpy65`. Live Mac installation/plugin check is
+  successful. Generic raw-on_click catalog warnings remain for the custom Sessions,
+  Accounts, New session and switch dialog; no dropped pills or Lua load failures.
+
+Real Enterprise SSO/model quota portability, asynchronous native hook timing and
+WSL were not directly exercised. Idle safety uses the independent native
+[Notification idle_prompt](https://code.claude.com/docs/en/hooks#notification)
+signal, because a Stop hook may continue generation; synthetic tests supply that
+signal through the real guard bridge. Native compatibility tests still require
+explicit user approval and account allowance. No deployment or capability grant
+was performed.

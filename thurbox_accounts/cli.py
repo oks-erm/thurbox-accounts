@@ -44,6 +44,8 @@ def parser():
     commands.add_parser('sync-accounts')
     simple_preview=commands.add_parser('simple-preview')
     simple_preview.add_argument('--session',required=True); simple_preview.add_argument('--to',required=True)
+    simple_select=commands.add_parser('simple-select')
+    simple_select.add_argument('--session',required=True); simple_select.add_argument('--to',required=True)
     simple_confirm=commands.add_parser('simple-confirm')
     simple_confirm.add_argument('token'); simple_confirm.add_argument('--consent',action='store_true')
     pane_state = commands.add_parser('pane-state')
@@ -118,7 +120,8 @@ def run(args):
     if verb.startswith('simple-'):
         from .simple import Simple
         simple=Simple(service)
-        value=simple.preview(args.session,args.to) if verb=='simple-preview' else simple.confirm(args.token,consent=args.consent)
+        value=(simple.confirm(args.token,consent=args.consent) if verb=='simple-confirm' else
+               getattr(simple,'select' if verb=='simple-select' else 'preview')(args.session,args.to))
         print(dumps(value)); return 0
     if verb.startswith('mode-'):
         from .mode import Mode

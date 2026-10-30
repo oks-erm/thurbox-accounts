@@ -7,7 +7,7 @@ from .desktop import Desktop
 
 OPERATIONS = {'pane-add','status','start','desktop-stop','desktop-start',
               'verify-shared','enable-shared','switch','recover-shared',
-              'mode-preview','mode-enable','mode-on','mode-off','simple-preview','simple-confirm','sync-accounts'}
+              'mode-preview','mode-enable','mode-on','mode-off','simple-preview','simple-select','simple-confirm','sync-accounts'}
 
 
 def add(store, label):
@@ -101,7 +101,8 @@ def indicator(accounts, selected, data, records):
 
 
 def receipt(action, value):
-    if action == 'simple-preview':
+    if action in {'simple-preview','simple-select'}:
+        if value.get('completed'): return 'switch-complete\t' + quote(value['profile'],safe='')
         def encoded(*values): return '\t'.join(quote(str(v),safe='') for v in values)
         lines=[encoded('switch-plan',value['id'],value['session'],value['source_profile'],value['target'],
                        'ready' if value['proof_ready'] else 'missing','approved' if value['approved'] else 'consent',value['name'])]

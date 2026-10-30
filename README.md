@@ -1,10 +1,11 @@
 # Thurbox Accounts
 
 A standalone Thurbox extension for switching between Claude Enterprise accounts.
-Each profile has a separate native SSO login and configuration directory. Start
-new sessions under a selected account, or enable one-click switching on a
-selected conversation with one shared local history. Includes the Accounts pane (F7)
-and an On/Off mode for existing local conversations in WSL, macOS and Linux.
+Each account has its own native SSO login. Choose a named account in normal
+**New session (Ctrl+N)**, then use **Switch account** beside the conversation's
+account label to continue the same history under another account.
+
+**For colleagues:** use the [short setup guide](docs/QUICKSTART.md).
 
 ## Install
 
@@ -38,8 +39,39 @@ For a nonstandard Thurbox location:
 ./bin/thurbox-accounts --thurbox-cli /absolute/path/to/thurbox-cli install
 ```
 
-Then open Thurbox, press **F7**, and grant the Accounts pane run/program
-capabilities in Interface settings yourself. Installation never grants them.
+Open Thurbox (press **F10** if already running). In **Settings → Interface**,
+allow **Sessions** for `new_session`, **Run/Program** for `accounts`, and **Run**
+for `account-status` and `account-switch`. These are one-time permissions; the
+installer never grants them. The dialogs link to Settings if permission is missing.
+
+## Start and switch accounts
+
+1. **F7 → Add account → Log in.** Repeat for each account with a distinct name.
+2. Optional, before using up either account: **Prepare switching…**, choose the
+   accounts, and review the compatibility check. It uses synthetic model requests
+   and account allowance; it never sends an existing conversation. Valid checks
+   are reused for the same accounts and native build.
+3. **Ctrl+N**, choose your project/name, then **Claude — Work A** in **Agent / account**.
+   The conversation shows **Account: Work A** from startup.
+4. Click **Switch account** in the conversation strip and choose **Work B**.
+   The first switch asks which accounts/organizations may access this history.
+   Later switches to those approved accounts continue directly.
+
+No separate switching-mode setup or second terminal is needed for these named
+sessions. Working tools, background jobs, scheduled wakeups and permission prompts
+block switching. Usage-limit switches use the guarded quota signal. An idle switch
+can wait about a minute for Claude's independent idle notification; a Stop hook
+alone can continue generation and is not treated as proof of idle.
+
+If compatibility was not checked before an account reached its limit, the initial
+check may fail until that account is available. The UI explains this and leaves
+the conversation on its current account. Use the named choices for new work;
+`claude (default / unmanaged)` retains Thurbox's original login and requires the
+advanced attachment flow below. Codex uses its default account.
+
+A recognized stock/owned New session pane is adapted with a backup. Custom edits
+are preserved and installation explains how to restore the stock pane before
+retrying. No Thurbox fork or shared library/layout edits are required.
 
 **Thurbox 2.75.2 installer issue:** do not use `extension install git+https://…`.
 It fails with “is a repository: it is cloned, not fetched file by file” before
@@ -104,19 +136,17 @@ metadata; it never signs in or sends a model request. Codex needs no permission.
 The strip uses Thurbox's automatic strips layout; custom layouts that removed
 that loop must restore it before the strip can appear (`plugin check` explains).
 
-## Use the Accounts pane
+## Accounts and older conversations
 
-1. Press **F7**. Click **Open Settings** if the pane asks for its one-time permissions.
-2. Enter a friendly account name (for example Work A), click **Add account**, then **Log in to Work A**. Finish Claude’s browser/SSO login; **F7** returns to your accounts. Repeat for the other account.
-3. Click **Conversations → New conversation**, choose/paste your project folder, then **Create conversation**.
-4. For an existing conversation, follow **Current-conversation mode** below.
-5. Once its mode is On, click **Switch to ACCOUNT** when you want to change accounts.
+**F7** manages logins and offers the optional compatibility preparation. Selecting
+a login here does not change a running conversation. Use Ctrl+N for new work and
+the conversation's **Switch account** button for changing accounts.
 
-Click controls directly, or use **Tab** and **Enter**. No Alt shortcuts, internal session IDs or comma-separated account names are needed. If a confirmation does not fit, enlarge the pane before continuing.
+The advanced conversation controls remain for older sessions. Install/update
+inside the same WSL environment where Thurbox runs; updating a Mac does not update
+another computer.
 
-Install/update on the computer and terminal where Thurbox runs. Updating a Mac does not update a Windows/WSL copy.
-
-## Current-conversation mode
+## Advanced: attach older unguarded conversations
 
 1. Select your existing Claude conversation in Thurbox's session list. Finish any
    tools, shell jobs and subagents before setup. In a second WSL terminal, park

@@ -109,6 +109,8 @@ class Profiles:
             values = self.read('profiles.json')
             if name in values:
                 raise ValueError('Profile already exists')
+            if any(p['label'].casefold()==label.casefold() for p in values.values()):
+                raise ValueError('Account name is already used; choose a distinct account name')
             path = self.root / 'profiles' / name
             if path.exists() or path.is_symlink():
                 raise ValueError('Profile directory already exists; refusing to adopt it')

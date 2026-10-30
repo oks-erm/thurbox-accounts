@@ -167,7 +167,7 @@ end
 dispatch = function(id)
   if id == "accounts.open" then
     if state.login_profile then state.login_profile = nil; state.screen = "accounts"; refresh(); command("focus", { text = "accounts" })
-    else state.conversation = nil; state.screen = store.selected and "conversations" or "accounts"; command("focus", { text = "accounts", toggle = true }) end
+    else state.conversation = nil; state.screen = "accounts"; command("focus", { text = "accounts", toggle = true }) end
     return true
   end
   if id:sub(1, 9) == "accounts." then id = id:sub(10) end
@@ -179,6 +179,8 @@ dispatch = function(id)
   local m, p = model(), account(model()); local c = conversation(m)
   if id == "refresh" then refresh()
   elseif id == "accounts" or id == "conversations" then navigate(id)
+  elseif id == "normal-new" then command("action", { text = "new_session.open" })
+  elseif id == "prepare" then navigate("prepare"); state.sharing = {}; for _, item in ipairs(m.accounts) do if item.saved then local names=state.sharing; names[#names+1]=item.name; state.sharing=names end end
   elseif id == "add-form" then state.add_form = not state.add_form; state.focus = 1
   elseif id == "add" then state.added_label = value("nickname"); ask({ "pane-add", value("nickname") })
   elseif id == "login" then launch_login(p)
@@ -237,6 +239,8 @@ return {
   focusable = true, input = "session", capabilities = { "run", "program" },
   keys = { { key = "f7", action = "accounts.open", desc = "Accounts", scope = "global" } },
   commands = {
+    { action = "accounts.normal-new", desc = "Open normal New session" },
+    { action = "accounts.prepare", desc = "Prepare account compatibility before starting work" },
     { action = "accounts.mode-on", desc = "Enable approved switching mode for this conversation" },
     { action = "accounts.mode-off", desc = "Disable account switches for this conversation" },
     { action = "accounts.mode-verify", desc = "Review paid compatibility check for switching mode" },
@@ -316,15 +320,15 @@ return {
         else say("Enlarge this pane to read all details before continuing.") end
         click("Cancel", "cancel")
       else
-        click("Logins / new conversations", "accounts"); click("Current conversation / conversations", "conversations")
+        click("New session (Ctrl+N)", "normal-new"); click("Logins", "accounts"); click("Advanced conversations", "conversations")
         if busy() then say("Working… Please wait. Compatibility checks can take several minutes.")
         elseif state.message then say(state.message)
         else
           local answer = result()
           if answer and answer.state == "done" then say((answer.ok and answer.stdout or answer.stderr or answer.error or "Operation failed"):sub(1, 500)) end
         end
-        if (state.screen or (m.current and "conversations" or "accounts")) == "accounts" then
-          say(#m.accounts == 0 and "1. Add your first account" or "Accounts for login / new conversations. Selecting one does not switch existing work.")
+        if (state.screen or "accounts") == "accounts" then
+          say(#m.accounts == 0 and "1. Add your first account" or "Add or sign in to accounts here. Choose an account in New session (Ctrl+N).")
           for _, item in ipairs(page_rows(m.accounts, state.account_page)) do
             click((p and p.name == item.name and "Selected: " or "") .. item.label .. " — " .. (item.saved and item.email or "Login required"), "account:" .. item.name)
           end
@@ -334,9 +338,10 @@ return {
             say("Give this account a name you will recognize, for example Work A.")
             add(input("nickname", "Account name")); click("Add account", "add")
           end
-          if p then say("Finish native browser/SSO login for each account, then open Conversations.") end
-        elseif state.screen == "sharing" then
-          say("3. Set up switching for " .. (c and c.name or "a conversation"))
+          if p then say("Finish browser/SSO login, then use Ctrl+N to start work.") end
+          if #m.accounts > 1 then click("Prepare switching…", "prepare") end
+        elseif state.screen == "sharing" or state.screen == "prepare" then
+          say(state.screen == "prepare" and "Prepare these accounts for switching before they reach their limits" or "Set up switching for " .. (c and c.name or "a conversation"))
           say("Select accounts below in the order you want to use them.")
           local names = group(m)
           for _, item in ipairs(page_rows(m.accounts, state.account_page)) do
@@ -345,9 +350,9 @@ return {
           end
           if #m.accounts > 4 then click("More accounts", "more-accounts") end
           say("Check compatibility once, then approve sharing for this conversation.")
-          click("Check compatibility…", "verify"); click("Review and enable mode…", "enable")
-          if c and not c.stopped then say("Finish tools and shell jobs, then stop this conversation in Thurbox before enabling."); if not c.external then click("Stop conversation…", "stop") end end
-          click("Back to conversations", "conversations")
+          click("Check compatibility…", "verify"); if state.screen ~= "prepare" then click("Review and enable mode…", "enable") end
+          if state.screen ~= "prepare" and c and not c.stopped then say("Finish tools and shell jobs, then stop this conversation in Thurbox before enabling."); if not c.external then click("Stop conversation…", "stop") end end
+          if state.screen == "prepare" then click("Back to accounts", "accounts") else click("Back to conversations", "conversations") end
         else
           if state.new_form and p then
             say("New conversation using " .. p.label)

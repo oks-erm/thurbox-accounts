@@ -146,7 +146,7 @@ class Mode:
         if self.store.read(self.shared.key(source['conversation'])):
             raise ValueError('Conversation is already shared; select its managed session and turn the mode on')
         value = dict(id=str(uuid.uuid4()),expires_at=time.time()+300,profiles=names,
-                     contract=contract,accounts=[dict(name=p['name'],label=self.store.get(p['name'])['label'],**p['identity']) for p in contract['profiles']],proof_ready=self.store.read('shared-proof.json')==contract,**source)
+                     contract=contract,accounts=[dict(name=p['name'],label=self.store.get(p['name'])['label'],**p['identity']) for p in contract['profiles']],proof_ready=self.shared.has_proof(contract),**source)
         self.store.write('mode-plan-'+value['id']+'.json',value)
         return value
 
@@ -238,7 +238,7 @@ class Mode:
         with self.store.lock('transition-'+identifier(native)):
             record = self.shared.load(native)
             if (row.get('id') != record['allowed_session'] or row.get('agent') != 'claude-accounts'
-                    or row.get('cwd') != record['cwd'] or row.get('host')
+                    or row.get('cwd') != record.get('primary_cwd',record['cwd']) or row.get('host')
                     or row.get('backend_type') not in {None,'tmux','local:tmux'}):
                 raise ValueError('Select the current managed conversation before changing its mode')
             if record['phase'] != 'active':

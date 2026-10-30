@@ -53,6 +53,13 @@ def register_profiles(accounts, launcher):
         raise ValueError('Cannot safely locate the Thurbox agent registry')
     command=tb.command[0] if getattr(tb,'command',None) else 'thurbox-cli'
     text=path.read_text(); existing=tomllib.loads(text).get('agents',[]); additions=[]; names=[]
+    labels=set()
+    for key in accounts.profiles.read('profiles.json'):
+        profile=accounts.profiles.get(key)
+        if not profile.get('identity'): continue
+        label=profile['label'].casefold()
+        if label in labels: raise ValueError('Account labels must be distinct; duplicate named-account choices were not registered')
+        labels.add(label)
     for key in accounts.profiles.read('profiles.json'):
         p=accounts.profiles.get(key)
         if not p.get('identity'): continue

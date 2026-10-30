@@ -32,7 +32,8 @@ def install(command: str, accounts_dir: Path, claude: str):
     pending = []
     # Preflight both owned files before writing either; preserve custom panes.
     for template_name, filename in [('accounts.lua', '90_accounts.lua'),
-                                    ('account_status.lua', '91_account_status.lua')]:
+                                    ('account_status.lua', '91_account_status.lua'),
+                                    ('account_switch.lua', '92_account_switch.lua')]:
         template = Path(__file__).with_name('ui') / template_name
         text = template.read_text().replace('@BASE@', json.dumps(shlex.join([str(launcher), *args]), ensure_ascii=False))
         text = text.replace('@EXECUTABLE@', json.dumps(str(launcher), ensure_ascii=False)).replace('@ARGS@',
@@ -47,6 +48,13 @@ def install(command: str, accounts_dir: Path, claude: str):
             if not (starter or delivered.get(str(destination)) == digest):
                 raise ValueError('Existing Accounts pane has custom edits; preserve it and install manually')
         pending.append((destination, text, current))
+    creation = directory/'plugins/70_new_session.lua'
+    if creation.is_symlink(): raise ValueError('New session pane must not be a symlink')
+    if creation.exists():
+        from .creation_ui import adapt
+        source=creation.read_text()
+        owned=delivered.get(str(creation))==hashlib.sha256(source.encode()).hexdigest()
+        pending.append((creation,adapt(source,owned=owned),source))
     backups = {}
     for destination, text, current in pending:
         if current is not None and current != text:
@@ -60,5 +68,5 @@ def install(command: str, accounts_dir: Path, claude: str):
     destination = pending[0][0]
     check = thurbox.call('plugin', 'check')
     return dict(pane=str(destination), indicator=str(pending[1][0]), backup=backups.get(str(destination)),
-                backups=backups, checked=check,
-                next='F10 reloads; F7 opens Accounts. Allow run/program for Accounts and run for account-status in Settings → Interface. No capabilities were granted.')
+                backups=backups, creation=str(creation) if creation.exists() else None, checked=check,
+                next='F10 reloads; F7 opens Accounts. Allow sessions for New session, run/program for Accounts and run for account-status/account-switch in Settings → Interface. No capabilities were granted.')

@@ -1,6 +1,8 @@
 """Selected shared history and serialized account transitions; no model requests."""
 import os
 import contextlib
+import hashlib
+import json
 from pathlib import Path
 import time
 import uuid
@@ -51,11 +53,22 @@ class Shared:
 
     def require_proof(self, names):
         contract = self.proof_contract(names)
-        proofs = self.store.read('shared-proof.json')
-        # One group is sufficient; changing membership/order/build requires new proof.
-        if proofs != contract:
+        if not self.has_proof(contract):
             raise ValueError('Shared switching disabled: run verify-shared for this ordered account group after login; native resume/compaction proof is required')
         return contract
+
+    def _proof_key(self, contract):
+        digest=hashlib.sha256(json.dumps(contract,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        return 'proof-cache-'+digest+'.json'
+
+    def has_proof(self, contract):
+        return self.store.read('shared-proof.json')==contract or self.store.read(self._proof_key(contract))==contract
+
+    def remember_proof(self, contract):
+        previous=self.store.read('shared-proof.json')
+        if previous: self.store.write(self._proof_key(previous),previous)
+        self.store.write(self._proof_key(contract),contract)
+        self.store.write('shared-proof.json',contract)
 
     def validate(self, record):
         if record.get('kind') == 'single':
@@ -138,6 +151,8 @@ class Shared:
                 transcript=str(canonical), sidecars=str(sidecars), aliases=aliases, profiles=names,
                 proof=proof, index=names.index(binding['profile']), phase='enrolling',
                 allowed_session='', reservation='', original_session=row['id'], original_sha256=digest)
+            if guarded_source:
+                record.update(cwd=prior['cwd'],primary_cwd=prior.get('primary_cwd',row['cwd']),native_dirs=prior.get('native_dirs',[]))
             if mode_plan is not None: record['source_snapshot'] = mode_plan
             if mode is not None: record['mode'] = mode
             if name is not None: record['name'] = name
@@ -179,7 +194,7 @@ class Shared:
         if not writer_available(self.store, record['conversation']):
             raise ValueError('A managed writer is still running; target was not launched')
         prior = self._runtime(record['conversation'])
-        if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('blocked') or prior.get('uncertain'):
+        if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('scheduled_work') or prior.get('blocked') or prior.get('uncertain'):
             raise ValueError('Previous worker activity or hook failure is unconfirmed; target was not launched')
         if prior.get('native_pid') or prior.get('phase') in {'starting','running'}:
             raise ValueError('Previous native process has not confirmed shutdown; inspect shared status')
@@ -200,7 +215,7 @@ class Shared:
                 self.tb.call('session','start',owner)
             else:
                 self.tb.call('session','create','--id',owner,'--name',(record['name']+' · '+owner[:6] if record.get('name') else 'shared-'+owner[:10]),
-                    '--repo-path',record['cwd'],'--agent',AGENT,'--multiplexer','tmux',
+                    '--repo-path',record.get('primary_cwd',record['cwd']),'--agent',AGENT,'--multiplexer','tmux',
                     '--resume',record['conversation'],'--on-existing','fail',
                     '--env','CLAUDE_CONFIG_DIR=' + target['directory'],
                     '--env','THURBOX_ACCOUNTS_ROOT=' + str(self.store.root),
@@ -258,25 +273,32 @@ class Shared:
         owner = record['allowed_session']
         request = uuid.uuid4().hex
         self.store.write('control-' + conversation + '.json',dict(owner=owner,request=request,action='stop-idle' if allow_idle else 'stop'))
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + (75 if allow_idle else 15)
         while time.monotonic() < deadline:
             state = self._runtime(conversation)
             if state.get('owner') != owner:
                 raise ValueError('Managed source ownership changed')
             if state.get('request') == request and state.get('stop_result') == 'busy':
+                if (allow_idle and state.get('turn') in {'idle','prompt'}
+                        and not any(state.get(k) for k in ('tools','subagents','background_tools','scheduled_work','blocked','uncertain','error'))
+                        and not state.get('scheduled_work_unknown',True)):
+                    if state.get('turn')=='prompt':
+                        request=uuid.uuid4().hex
+                        self.store.write('control-'+conversation+'.json',dict(owner=owner,request=request,action='stop-idle'))
+                    time.sleep(.1); continue
                 if state.get('background_tools'):
                     raise ValueError('Background shell/task completion is unconfirmed. Finish it in native Claude before switching; the source remains running')
                 raise ValueError('Source is working, awaiting permission, or has no proven usage-limit stop; it remains running')
             if state.get('phase') == 'stopped' and not state.get('native_pid'):
                 from .guard import safe_state
-                if any(state.get(k) for k in ('tools','subagents','background_tools','blocked','uncertain','error')) or allow_idle and not safe_state(state,allow_idle=True):
+                if any(state.get(k) for k in ('tools','subagents','background_tools','scheduled_work','blocked','uncertain','error')) or allow_idle and not safe_state(state,allow_idle=True):
                     raise ValueError('Stopped source still has unconfirmed tool/subagent activity; target was not launched')
                 break
             if state.get('error'):
                 raise ValueError(state['error'])
             time.sleep(0.1)
         else:
-            raise TimeoutError('Source did not confirm safe shutdown; target was not launched')
+            raise TimeoutError('Claude did not confirm a safe idle prompt or usage-limit stop. Source remains running; target was not launched')
         self.tb.call('session','stop',owner)
         if self.tb.call('session','get',owner).get('stopped') is not True:
             raise ValueError('Thurbox did not confirm source stopped')

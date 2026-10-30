@@ -93,10 +93,10 @@ class SimpleTests(unittest.TestCase):
 
     def test_confirmed_idle_switch_policy_still_refuses_background_or_unknown_work(self):
         from thurbox_accounts.guard import safe_state
-        self.assertTrue(safe_state(dict(turn='idle'),allow_idle=True))
+        self.assertTrue(safe_state(dict(turn='prompt',scheduled_work_unknown=False),allow_idle=True))
         self.assertFalse(safe_state(dict(turn='idle')))
         for extra in [dict(tools=['x']),dict(subagents=['x']),dict(background_tools={'x':'task'}),dict(blocked=True),dict(uncertain=True),dict(error='bad')]:
-            self.assertFalse(safe_state(dict(turn='idle',**extra),allow_idle=True))
+            self.assertFalse(safe_state(dict(turn='prompt',scheduled_work_unknown=False,**extra),allow_idle=True))
         self.assertFalse(safe_state(dict(turn='unknown'),allow_idle=True))
 
     def history(self):
@@ -155,3 +155,88 @@ class SimpleTests(unittest.TestCase):
         Desktop(self.accounts).start(self.owner)
         self.assertIn(('session','start',self.owner),self.tb.calls)
         self.assertFalse(any(c[:2]==('session','create') for c in self.tb.calls))
+
+    def test_select_previously_approved_account_uses_existing_consent_only(self):
+        simple=self.simple()
+        approved=dict(id=self.uuid,approved=True,proof_ready=True)
+        with patch.object(simple,'preview',return_value=approved), patch.object(simple,'confirm',return_value=dict(profile='b',session='replacement')) as confirm:
+            self.assertTrue(simple.select(self.owner,'b')['completed'])
+            confirm.assert_called_once_with(self.uuid,consent=True)
+        with patch.object(simple,'preview',return_value=dict(approved=False,proof_ready=True)), patch.object(simple,'confirm') as confirm:
+            self.assertFalse(simple.select(self.owner,'b')['approved'])
+            confirm.assert_not_called()
+
+    def test_renamed_named_session_keeps_its_account_and_resumes(self):
+        self.bootstrap(); self.tb.sessions[self.owner]['name']='Renamed project'
+        record=self.simple().bootstrap('a',['--resume',self.uuid],self.owner,self.root)
+        self.assertEqual(record['name'],'Renamed project')
+        self.assertEqual(record['profiles'],['a'])
+
+    def test_duplicate_labels_are_rejected_before_registry_mutation(self):
+        from thurbox_accounts.agent_install import register_profiles
+        profiles=self.store.read('profiles.json'); profiles['b']['label']=profiles['a']['label']
+        self.store.write('profiles.json',profiles)
+        registry=self.root/'agents.toml'; registry.write_text('config_version=1\n[[agents]]\nname="claude"\ncommand="claude"\n')
+        before=registry.read_bytes()
+        with patch.object(self.tb,'call',return_value={'paths':{'agents_toml':str(registry)}}), self.assertRaisesRegex(ValueError,'distinct|duplicate'):
+            register_profiles(self.accounts,Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent')
+        self.assertEqual(registry.read_bytes(),before)
+
+    def test_stop_hook_cannot_prove_idle_before_other_hooks_decide_to_continue(self):
+        from thurbox_accounts.guard import apply_event, safe_state
+        state={}
+        apply_event(state,'Stop',dict(background_tasks=[],session_crons=[],stop_hook_active=False))
+        self.assertFalse(safe_state(state,allow_idle=True))
+        # A later notification is independent of potentially blocking Stop hooks.
+        apply_event(state,'Notification',dict(notification_type='idle_prompt'))
+        self.assertTrue(safe_state(state,allow_idle=True))
+        apply_event(state,'UserPromptSubmit',{})
+        self.assertFalse(safe_state(state,allow_idle=True))
+        apply_event(state,'Stop',dict(background_tasks=[],session_crons=[{'id':'wake-later'}]))
+        apply_event(state,'Notification',dict(notification_type='idle_prompt'))
+        self.assertFalse(safe_state(state,allow_idle=True))
+
+    def test_named_workspace_and_additional_directories_survive_enrollment(self):
+        extra=self.root/'extra'; extra.mkdir()
+        workspace=self.root/'workspace'; workspace.mkdir()
+        self.simple().bootstrap('a',['--session-id',self.uuid,'--add-dir',str(extra)],self.owner,workspace)
+        record=Shared(self.accounts).load(self.uuid)
+        self.assertEqual(record['native_dirs'],[str(extra)])
+        path=self.history(); self.tb.sessions[self.owner]['stopped']=True
+        self.store.write('runtime-'+self.uuid+'.json',dict(owner=self.owner,phase='stopped',turn='prompt',scheduled_work_unknown=False))
+        shared=Shared(self.accounts); self.store.write('shared-proof.json',shared.proof_contract(['a','b']))
+        result=shared.enroll(self.owner,['a','b'],consent=True,launch=False,guarded_source=True)
+        self.assertEqual(result['cwd'],str(workspace))
+        self.assertEqual(result['primary_cwd'],str(self.root))
+        self.assertEqual(result['native_dirs'],[str(extra)])
+        self.assertTrue(path.is_symlink())
+
+    def test_partial_initial_record_write_can_retry_same_verified_binding(self):
+        original=self.store.write
+        def fail_record(name,value):
+            if name.startswith('shared-'): raise OSError('synthetic write failure')
+            return original(name,value)
+        with patch.object(self.store,'write',side_effect=fail_record), self.assertRaises(OSError):
+            self.bootstrap()
+        self.assertEqual(self.bootstrap()['profiles'],['a'])
+
+    def test_prepared_pair_is_reused_when_starting_with_second_account(self):
+        self.tb.sessions[self.owner]['agent']='Claude — Work B'
+        self.simple().bootstrap('b',['--session-id',self.uuid],self.owner,self.root)
+        shared=Shared(self.accounts)
+        self.store.write('shared-proof.json',shared.proof_contract(['a','b']))
+        plan=self.simple().preview(self.owner,'a')
+        self.assertTrue(plan['proof_ready']); self.assertEqual(plan['source_profile'],'b')
+        self.assertEqual(plan['profiles'],['a','b'])
+        shared.remember_proof(shared.proof_contract(['a','b']))
+        shared.remember_proof(shared.proof_contract(['a','c']))
+        self.assertTrue(self.simple().preview(self.owner,'a')['proof_ready'])
+
+    def test_valid_checks_for_other_account_groups_are_retained(self):
+        shared=Shared(self.accounts); first=shared.proof_contract(['a','b'])
+        shared.remember_proof(first)
+        shared.remember_proof(shared.proof_contract(['a','c']))
+        self.assertEqual(shared.require_proof(['a','b']),first)
+        with patch.object(self.accounts.claude,'fingerprint',return_value='updated-native'):
+            with self.assertRaisesRegex(ValueError,'verify'):
+                shared.require_proof(['a','b'])

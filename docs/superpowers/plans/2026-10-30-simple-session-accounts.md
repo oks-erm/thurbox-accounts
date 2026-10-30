@@ -1,6 +1,6 @@
 # Simple Session Accounts Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Named accounts in normal Ctrl+N, with safe inline switching and no terminal setup.
 
@@ -33,10 +33,10 @@
 
 **Interfaces:** `Simple.bootstrap(profile, native_args, owner, cwd)` creates/validates a single-account guard record and immutable binding; `Simple.source(session)` returns stopped row/binding/path/digest for safe enrollment. `register_profiles(service, launcher)` additively registers owned `Claude — LABEL` choices. Guard launcher dispatches its own account options before normal native arguments.
 
-- [ ] Add failing tests for named-agent ownership/idempotence/custom edits; bootstrap no proof, changed UUID/profile and stale owner refusals.
-- [ ] Implement registration/dispatch and single-account record validation. Wait for persisted Thurbox row before verifying startup. Preserve hook-only native settings and directories.
-- [ ] Reuse lifetime writer/supervisor; ordinary starts never grant cross-account access. Test actual synthetic process startup, refusal on working/background state and safe idle stop.
-- [ ] Run targeted unit/compile and synthetic tmux creation tests; commit.
+- [x] Add failing tests for named-agent ownership/idempotence/custom edits; bootstrap no proof, changed UUID/profile and stale owner refusals.
+- [x] Implement registration/dispatch and single-account record validation. Wait for persisted Thurbox row before verifying startup. Preserve hook-only native settings and directories.
+- [x] Reuse lifetime writer/supervisor; ordinary starts never grant cross-account access. Test actual synthetic process startup, refusal on working/background state and safe idle stop.
+- [x] Run targeted unit/compile and synthetic tmux creation tests; commit.
 
 ### Task 2: Frozen inline switch workflow
 
@@ -44,10 +44,10 @@
 
 **Interfaces:** `Simple.preview(session, target)` returns single-use five-minute source/target consent plan and proof readiness. `Simple.confirm(token, consent=True)` revalidates identities/owner, safely stops, enrolls/extends approved aliases and launches selected target. `simple-preview`, `simple-confirm` expose those methods; `pane-run` supplies friendly TSV receipts.
 
-- [ ] Write failing tests for no consent, expired/reused plan, missing proof, changed identities/owner, target already exists, mode Off and failed recovery evidence.
-- [ ] Implement guarded idle/quota pause using existing control channel and freeze/recheck; target preflight precedes pause. Keep legacy quota-only switch behavior unless explicit inline action chooses idle-safe policy.
-- [ ] Enroll a stopped single source using existing move/link path after revalidation; extend approved groups with durable records and collision checks; launch exact target rather than cycle order. Maintain confirmed-account evidence.
-- [ ] Test real synthetic A→B→A with same UUID/history, no fork/model calls, busy source PID survives, stale source cannot restart. Commit.
+- [x] Write failing tests for no consent, expired/reused plan, missing proof, changed identities/owner, target already exists, mode Off and failed recovery evidence.
+- [x] Implement guarded idle/quota pause using existing control channel and freeze/recheck; target preflight precedes pause. Keep legacy quota-only switch behavior unless explicit inline action chooses idle-safe policy.
+- [x] Enroll a stopped single source using existing move/link path after revalidation; extend approved groups with durable records and collision checks; launch exact target rather than cycle order. Maintain confirmed-account evidence.
+- [x] Test real synthetic A→B→A with same UUID/history, no fork/model calls, busy source PID survives, stale source cannot restart. Commit.
 
 ### Task 3: Normal creation and inline UI
 
@@ -55,16 +55,16 @@
 
 **Interfaces:** owned generated adapter cleans registry account labels in normal Ctrl+N, hides internal guard choice, retains default/provider/project/worktree choices. `account-status` adds `Switch account` hit target; a compact modal performs preview, optional paid verification review, sharing confirmation, errors/progress/recovery. F7 is only account management.
 
-- [ ] Add failing installer tests for recognized upstream creation template, owned updates, custom edits, symlinks, fresh install/rerun, complete destination preflight and package payload.
-- [ ] Implement minimal checked picker integration and named registry refresh on explicit account add/status. Do not mutate render snapshots or grant capabilities.
-- [ ] Implement inline modal using supported nodes/actions, keyboard/clicks, cancellation, stale-selection rejection and height-gated consent. Explain unguarded sources; no misleading switch action.
-- [ ] Validate actual Ctrl+N and inline chooser in isolated real TUI with synthetic backend; preserve existing guided-pane and strip smoke tests. Commit.
+- [x] Add failing installer tests for recognized upstream creation template, owned updates, custom edits, symlinks, fresh install/rerun, complete destination preflight and package payload.
+- [x] Implement minimal checked picker integration and named registry refresh on explicit account add/status. Do not mutate render snapshots or grant capabilities.
+- [x] Implement inline modal using supported nodes/actions, keyboard/clicks, cancellation, stale-selection rejection and height-gated consent. Explain unguarded sources; no misleading switch action.
+- [x] Validate actual Ctrl+N and inline chooser in isolated real TUI with synthetic backend; preserve existing guided-pane and strip smoke tests. Commit.
 
 ### Task 4: Delivery
 
 **Files:** README.md, docs/ACCOUNTS.md, docs/VALIDATION.md, AGENTS.md, versions/manifest.
 
-- [ ] Replace colleague-facing instructions with sign-in once, Ctrl+N choose account, inline Switch account; clearly describe permission and optional paid verification.
-- [ ] Run full Python suite/compile, distribution, real TUI and synthetic tmux smoke, fresh installer/rerun and live plugin check.
-- [ ] Request a fresh whole-branch review, resolve findings with regression tests, and rerun affected checks.
+- [x] Replace colleague-facing instructions with sign-in once, Ctrl+N choose account, inline Switch account; clearly describe permission and optional paid verification.
+- [x] Run full Python suite/compile, distribution, real TUI and synthetic tmux smoke, fresh installer/rerun and live plugin check.
+- [x] Request a fresh whole-branch review, resolve findings with regression tests, and rerun affected checks.
 - [ ] Commit, fast-forward main, push; verify remote hash and CI status. Report real WSL/Enterprise verification limits.

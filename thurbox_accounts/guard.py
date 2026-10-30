@@ -16,7 +16,7 @@ from .shared import Shared, identifier
 from .thurbox import Thurbox, strict_json
 
 EVENTS = ('UserPromptSubmit','PreToolUse','PostToolUse','PostToolUseFailure',
-          'PermissionRequest','SubagentStart','SubagentStop','Stop','StopFailure')
+          'PermissionRequest','SubagentStart','SubagentStop','Stop','StopFailure','Notification')
 
 
 def authorize(record, owner, reservation):
@@ -76,6 +76,11 @@ def apply_event(state, event, payload):
                 or any(not isinstance(t,dict) or not isinstance(t.get('id'),str) or not t['id'] for t in tasks)):
             raise ValueError('Native background task registry is invalid; completion is unconfirmed')
         background = {'native:'+t['id']:t['id'] for t in tasks}
+    if event == 'Stop':
+        jobs=payload.get('session_crons')
+        if jobs is not None and (not isinstance(jobs,list) or len(jobs)>1000 or any(not isinstance(t,dict) or not t.get('id') for t in jobs)):
+            raise ValueError('Native scheduled work registry is invalid')
+        state.update(scheduled_work=jobs or [],scheduled_work_unknown=jobs is None)
     tool = payload.get('tool_use_id')
     agent = payload.get('agent_id')
     if event == 'UserPromptSubmit':
@@ -110,6 +115,11 @@ def apply_event(state, event, payload):
         agents.add(agent)
     elif event == 'SubagentStop':
         agents.discard(agent)
+    elif event == 'Notification':
+        kind=payload.get('notification_type')
+        if kind=='idle_prompt' and state.get('turn')=='idle' and not state.get('scheduled_work_unknown',True):
+            state['turn']='prompt'
+        elif kind=='quota_auto_resume_fired': state['turn']='working'
     elif event in {'Stop','StopFailure'}:
         # Stop hooks can themselves request another turn. An API rate-limit
         # StopFailure is notification-only and cannot keep that turn running.
@@ -122,8 +132,9 @@ def apply_event(state, event, payload):
 
 
 def safe_state(state, *, allow_idle=False):
-    return (state.get('turn') in ({'quota','idle'} if allow_idle else {'quota'}) and not state.get('tools') and not state.get('subagents')
-            and not state.get('background_tools') and not state.get('blocked') and not state.get('uncertain') and not state.get('error'))
+    return (state.get('turn') in ({'quota','prompt'} if allow_idle else {'quota'}) and not state.get('tools') and not state.get('subagents')
+            and not state.get('background_tools') and not state.get('scheduled_work')
+            and (state.get('turn') != 'prompt' or not state.get('scheduled_work_unknown',True)) and not state.get('blocked') and not state.get('uncertain') and not state.get('error'))
 
 
 def hook(store, shared, conversation, owner, event):
@@ -211,13 +222,19 @@ def supervise(shared, record, owner, profile, native, args, launcher):
             prior = shared._runtime(conversation)
             if prior.get('native_pid') or prior.get('phase') in {'starting','running'}:
                 raise ValueError('Previous native shutdown is unconfirmed; inspect shared status before recovery')
-            if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('blocked') or prior.get('uncertain'):
+            if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('scheduled_work') or prior.get('blocked') or prior.get('uncertain'):
                 raise ValueError('Previous worker activity or hook failure is unconfirmed')
+            if record.get('kind')!='single':
+                args=list(args)
+                for directory in record.get('native_dirs',[]):
+                    path=Path(directory)
+                    if not path.is_absolute() or not path.is_dir(): raise ValueError('Original additional directory is unavailable')
+                    args += ['--add-dir',str(path)]
             args, settings = guarded_settings(args,launcher)
             settings_path = Path(record['transcript']).parent / ('hooks-' + owner + '.json')
             atomic_write(settings_path,dumps(settings))
             update(store,conversation,owner=owner,phase='starting',native_pid=None,
-                   turn='unknown',tools=[],subagents=[],background_tools={},blocked=False,error=None,uncertain=False,request=None,stop_result=None)
+                   turn='unknown',tools=[],subagents=[],background_tools={},scheduled_work=[],scheduled_work_unknown=True,blocked=False,error=None,uncertain=False,request=None,stop_result=None)
             child = None
             try:
                 child = subprocess.Popen([native,*args,'--settings',str(settings_path)],

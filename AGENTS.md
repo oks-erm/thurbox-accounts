@@ -154,3 +154,35 @@ agent, local backend and cwd, independent of the login picker or owner mapping.
 Never authenticate during refresh. Unknown Claude accounts remain unverified;
 failed switches name the last confirmed profile. Validate with
 `python3.11 examples/account_status_smoke.py` and the guided pane smoke.
+
+## Simple session flow (0.5.0)
+
+`simple.py` binds named native starts to a single-account guarded record before
+launch. `agent_install.register_profiles` additively registers named agents after
+verified login; preflight duplicate labels/custom registry edits. `creation_ui.py`
+adapts only recognized stock/owned New session Lua, preserving native project and
+worktree choices, hiding the internal guard and removing wrapper paths from labels.
+The modified new_session pane requires user-granted Sessions; its permission dialog
+must let settings actions through and cancel cleanly. Never grant capabilities.
+
+`ui/account_switch.lua` is a separate float (floats cannot also fill a strip);
+`account_status.lua` keeps the visible strip and opens it. Frozen five-minute plans
+pin owner, UUID, identity/group, native/primary cwd and additional dirs. First switch
+retains explicit group consent and valid native proof; selecting a previously
+approved account can confirm directly. Cache only actually verified exact proof
+contracts by full account identities/build/order, never synthesize one in production.
+A single-account start does not need a cross-account proof. New history remains in
+its native directory until guarded first-switch enrollment. Preserve multi-repo
+working directory/add-dir context and stale-owner refusals after enrollment.
+
+Stop hooks may continue generation. Idle switching requires a later Notification
+idle_prompt and known-empty scheduled-work registry, not Stop alone. Source remains
+running on active/unknown work or timeout. Quota path retains existing guarded stop.
+See https://code.claude.com/docs/en/hooks#notification and #stop-input. Track native
+scheduled wakeups and quota_auto_resume_fired as well as tool/subagent/background
+work. Keep native guard settings/policies and process-lifetime lease intact.
+
+Validate unit/compile/distribution, `examples/inline_switch_smoke.py`, strip and
+guided-pane smokes, and `examples/shared_smoke.py --simple --desktop` plus legacy
+`--mode --desktop`. Inline UI smoke has synthetic receipts/no-op create only;
+tmux smoke uses real synthetic processes, not real Enterprise auth/model quota.

@@ -31,6 +31,12 @@ return {
   capabilities = { "run" },
   ui_state = function() return { label = summary(), selected = store.selected } end,
   render = function(ctx)
-    return { type = "text", text = summary(true), role = "action:accounts.open", style = { fg = theme.accent } }
+    local label=summary(true)
+    local node={type="text",text=label,fill=1,role="action:accounts.open",style={fg=theme.accent}}
+    if store.selected and not label:find("Codex",1,true) then
+      return {type="box",axis="horizontal",children={node,
+        {type="text",text="[ Switch account ]",len=20,role="action:account-switch.open",style={fg=theme.accent_bright}}}}
+    end
+    return node
   end,
 }

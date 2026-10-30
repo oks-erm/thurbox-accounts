@@ -39,7 +39,7 @@ def main():
         'session = { id="selected", agent=state.fixture == "codex" and "codex" or "claude" }')
     source = source.replace('local answer = (thurbox.runs or {})[key]',
         'local answer = state.fixture ~= "loading" and {state="done",ok=state.fixture ~= "error",stdout="indicator\\tselected\\tclaude\\t" .. (state.fixture == "b" and "Enterprise%20B" or "Enterprise%20A") .. "\\trunning"} or nil')
-    source = source.replace('capabilities = { "run" },','capabilities = { "run" },\n  commands = {{action="status.codex",desc="Test"},{action="status.a",desc="Test"},{action="status.b",desc="Test"},{action="status.loading",desc="Test"},{action="status.error",desc="Test"},{action="status.none",desc="Test"}},\n  on_action = function(action) state.fixture=action:match("status%.(.+)"); return true end,')
+    source = source.replace('capabilities = { "run" },', 'capabilities = { "run" },\n  commands={{action="status.codex",desc="Test"},{action="status.a",desc="Test"},{action="status.b",desc="Test"},{action="status.loading",desc="Test"},{action="status.error",desc="Test"},{action="status.none",desc="Test"}},\n  on_action=function(action) state.fixture=action:match("status%.(.+)"); return true end,')
     # Fixture run exists only in this copy. It never starts a child process.
     path.write_text('local run = function() end\n'+source)
     assert call('plugin','check')['ok']

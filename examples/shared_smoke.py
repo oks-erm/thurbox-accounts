@@ -83,16 +83,16 @@ while True:
             time.sleep(0.1)
         raise AssertionError('Fixture did not become ready: ' + str(root))
     try:
-        install_checkout(binary,store.root,str(native),root/'bin')
+        installation=install_checkout(binary,store.root,str(native),root/'bin')
         store.add('enterprise-a')
         store.add('enterprise-b')
         # Synthetic fixture proof is bound to this synthetic executable only.
-        store.write('shared-proof.json',shared.proof_contract(['enterprise-a','enterprise-b']))
+        if not args.simple: store.write('shared-proof.json',shared.proof_contract(['enterprise-a','enterprise-b']))
         if args.simple:
-            from thurbox_accounts.agent_install import register_profiles
             from thurbox_accounts.simple import Simple, agent_name
-            for name in ('enterprise-a','enterprise-b'): service.status(name)
-            register_profiles(service,Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent')
+            for name in ('enterprise-a','enterprise-b'):
+                result=subprocess.run([installation['launcher'],'--accounts-dir',str(store.root),'--claude',str(native),'--thurbox-cli',binary,'status',name],capture_output=True,text=True,timeout=30)
+                assert result.returncode==0,result.stderr
             source=tb.call('session','create','--name','synthetic-named','--repo-path',str(root),
                 '--agent',agent_name(store.get('enterprise-a')),'--on-existing','fail')
         elif args.mode:
@@ -110,6 +110,9 @@ while True:
         if args.simple:
             conversation=source['agent_session_id']
             wait(lambda: shared._runtime(conversation).get('turn')=='quota')
+            assert not store.read('shared-proof.json')  # normal named start needs no model proof
+            assert not Simple(service).preview(source['id'],'enterprise-b')['proof_ready']
+            store.write('shared-proof.json',shared.proof_contract(['enterprise-a','enterprise-b']))
             before=shared._runtime(conversation)['native_pid']
             # An explicit idle checkpoint, through the actual native hook bridge.
             native_env=dict(os.environ,THURBOX_ACCOUNTS_ROOT=str(store.root),THURBOX_ACCOUNTS_CONVERSATION=conversation,
@@ -118,7 +121,8 @@ while True:
                 result=subprocess.run([str(Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent'),'--event',event],
                     env=native_env,input=json.dumps(dict(session_id=conversation,hook_event_name=event,**payload)),capture_output=True,text=True,timeout=15)
                 assert result.returncode==0,result.stderr
-            simple_event('Stop',background_tasks=[])
+            simple_event('Stop',background_tasks=[],session_crons=[])
+            simple_event('Notification',notification_type='idle_prompt')
             simple_event('PreToolUse',tool_use_id='busy-shell',tool_name='Bash',tool_input={'run_in_background':True})
             simple_event('PostToolUse',tool_use_id='busy-shell',tool_name='Bash',tool_response={'backgroundTaskId':'busy-task'})
             simple_event('Stop')
@@ -127,7 +131,8 @@ while True:
             except ValueError as error: assert 'Background' in str(error),str(error)
             else: raise AssertionError('Named busy source was switched')
             assert shared._runtime(conversation)['native_pid']==before; os.kill(before,0)
-            simple_event('Stop',background_tasks=[])
+            simple_event('Stop',background_tasks=[],session_crons=[])
+            simple_event('Notification',notification_type='idle_prompt')
             plan=Simple(service).preview(source['id'],'enterprise-b')
             current=Simple(service).confirm(plan['id'],consent=True)
             assert current['profile']=='enterprise-b'
