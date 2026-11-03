@@ -78,6 +78,66 @@ class Mode:
         self.tb = accounts.thurbox
         self.shared = Shared(accounts)
 
+    def verify_account(self, session, profile=None, *, assign=False, native=None, cwd=None, consent=False):
+        """Label an existing session without adopting, stopping or sharing it."""
+        row = self.tb.call('session','get',session)
+        if row.get('host') or row.get('backend_type') not in {None,'tmux','local:tmux'} or row.get('agent') != 'claude':
+            raise ValueError('Select an ordinary local Claude conversation to verify its account')
+        if assign and (not consent or not profile):
+            raise ValueError('Explicit consent and a named account are required for manual assignment')
+        if assign and (row.get('agent_session_id') != native or row.get('cwd') != cwd):
+            raise ValueError('Conversation changed since assignment review; review it again')
+        native = identifier(row['agent_session_id'])
+        launch = self.tb.call('agent','launch-args','claude','--session',row['id'])
+        expected = shutil.which(self.accounts.claude.executable)
+        executable = shutil.which(launch.get('command',''))
+        if not expected or not executable or Path(expected).resolve() != Path(executable).resolve():
+            raise ValueError('Source Claude executable differs from the configured native build')
+        directory = Path(launch.get('env',{}).get('CLAUDE_CONFIG_DIR') or Path.home()/'.claude')
+        checked(directory,directory=True)
+        account_env(dict(directory=str(directory)),launch.get('env',{}))
+        status = self.accounts.claude.status(dict(name='source',directory=str(directory)))
+        if status.get('loggedIn') is True and not status.get('email') and not assign:
+            raise ValueError('Claude reports this conversation\'s native login as signed in, but returns no email identity. '
+                             'Use Assign account to select the account yourself. It will be labelled assigned rather than verified.')
+        if (status.get('loggedIn') is not True or status.get('authMethod') != 'claude.ai'
+                or status.get('configDirectory') != str(directory)):
+            raise ValueError('Cannot verify this conversation\'s native login; sign in to its original account first')
+        identity = {key:status[key] for key in ('email','orgId') if status.get(key)}
+        names = [profile] if profile else list(self.store.read('profiles.json'))
+        matches = []
+        for name in names:
+            candidate = self.store.get(name)
+            if assign and any(status.get(key) and status[key] != candidate.get('identity',{}).get(key)
+                              for key in ('email','orgId')):
+                continue
+            if candidate.get('identity') == identity or assign and not status.get('email'):
+                confirmed = self.accounts.authenticated(name)
+                if confirmed['identity'] == identity or assign and not status.get('email'): matches.append(confirmed)
+        if len(matches) != 1:
+            raise ValueError('Native login is ' + (status.get('email') or 'unknown') + '. No unique matching named account; '
+                             'sign in to that account in Logins, or select its name and use Verify as.')
+        path = Path(row.get('transcript_path') or '')
+        checked(path)
+        if path.name != native+'.jsonl' or path.parent.parent != directory/'projects':
+            raise ValueError('Conversation history does not belong to the verified native login directory')
+        fields = ('id','agent','agent_session_id','cwd','transcript_path','host','backend_type')
+        stamp = {key:row.get(key) for key in fields}
+        current = self.tb.call('session','get',session)
+        if any(current.get(key) != value for key,value in stamp.items()):
+            raise ValueError('Conversation changed during verification; select it and try again')
+        matched = matches[0]
+        binding = self.store.read('bindings.json').get(row['id'])
+        if binding and binding.get('identity') != matched['identity']:
+            raise ValueError('The selected account does not match this conversation\'s existing account binding')
+        assigned = assign and not status.get('email')
+        with self.store.lock():
+            values = self.store.read('verified-accounts.json')
+            values[row['id']] = dict(profile=matched['name'],identity=matched['identity'],source=stamp,assigned=assigned,
+                                   directory=str(directory),verified_at=time.time())
+            self.store.write('verified-accounts.json',values)
+        return dict(session=row['id'],profile=matched['name'],label=matched['label'],verified=not assigned,assigned=assigned)
+
     def source(self, session, names):
         row = self.tb.call('session','get',session)
         if row.get('host') or row.get('backend_type') not in {None,'tmux','local:tmux'} or row.get('agent') != 'claude':
@@ -97,9 +157,19 @@ class Mode:
         account_env(dict(directory=str(directory)),launch.get('env',{}))
         source = self.accounts.claude.status(dict(name='source',directory=str(directory)))
         if (source.get('loggedIn') is not True or source.get('authMethod') != 'claude.ai'
-                or source.get('configDirectory') != str(directory) or not source.get('email')):
+                or source.get('configDirectory') != str(directory)):
             raise ValueError('Cannot verify the source native browser/SSO account and directory')
         identity = {key:source[key] for key in ('email','orgId') if source.get(key)}
+        assignment = None
+        if not source.get('email'):
+            saved = self.store.read('verified-accounts.json').get(row['id'], {})
+            if (not saved.get('assigned') or saved.get('directory') != str(directory) or
+                    not saved.get('source') or any(row.get(k) != v for k,v in saved['source'].items())):
+                raise ValueError('Native login has no email identity. Use Assign account for this conversation before switching setup.')
+            assignment = saved
+            identity = saved['identity']
+            if source.get('orgId') and source['orgId'] != identity.get('orgId'):
+                raise ValueError('Native organization no longer matches the assigned account; review account setup again')
         profiles = [self.accounts.authenticated(name) for name in names]
         matches = [p for p in profiles if p['identity'] == identity]
         if len(matches) != 1:
@@ -114,6 +184,7 @@ class Mode:
         value = dict(session=row['id'],conversation=native,cwd=row['cwd'],name=row.get('name',row['id']),
                     source_profile=matches[0]['name'],source_identity=identity,directory=str(directory),
                     transcript=str(path),manifest=manifest(path))
+        if assignment: value['source_assignment'] = assignment
         self._row_unchanged(value)
         return value
 
@@ -158,7 +229,7 @@ class Mode:
             if not plan or plan.get('used') or time.time() > plan['expires_at']:
                 raise ValueError('Switching setup confirmation expired or was used; review the current conversation again')
             names = plan['profiles']
-            if self.shared.require_proof(names) != plan['contract']:
+            if self.shared.proof_contract(names) != plan['contract']:
                 raise ValueError('Account identities or Claude build changed; review setup again')
             current = self.source(plan['session'],names)
             if any(current[k] != plan[k] for k in current):
@@ -172,7 +243,7 @@ class Mode:
                 if str(Path(self.store.get(binding['profile'])['directory'])) != plan['directory']:
                     raise ValueError('Owned source directory changed')
                 return self.shared.enroll(plan['session'],names,consent=True,mode=mode,name=name,
-                                          expected_digest=plan['manifest']['main']['sha256'],mode_plan=plan)
+                                          expected_digest=plan['manifest']['main']['sha256'],mode_plan=plan,expected_contract=plan['contract'])
             return self._adopt(plan,mode,name)
 
     def _adopt(self, plan, mode, name):
@@ -196,7 +267,7 @@ class Mode:
             private_dir(folder)
             record = dict(conversation=native,project=Path(plan['transcript']).parent.name,cwd=plan['cwd'],name=name,
                 transcript=str(folder/'main.jsonl'),sidecars=str(folder/'session'),aliases=aliases,profiles=names,
-                proof=plan['contract'],index=mode['active_index'],phase='enrolling',allowed_session='',reservation='',
+                proof=plan['contract'],history_consent=plan['contract'],index=mode['active_index'],phase='enrolling',allowed_session='',reservation='',
                 original_session=plan['session'],original_sha256=plan['manifest']['main']['sha256'],
                 mode=mode,adopted=True,source_snapshot=plan)
             self.shared.save(record)  # Durable recovery before the first snapshot write.
@@ -244,7 +315,7 @@ class Mode:
             if record['phase'] != 'active':
                 raise ValueError('Recover the failed transition before changing the switching mode')
             self.shared.validate(record)
-            if enabled: self.shared.require_proof(record['profiles'])
+            if enabled: self.shared.require_consent(record)
             runtime = self.shared._runtime(native)
             if runtime.get('uncertain') or runtime.get('error'):
                 raise ValueError('Inspect recovery evidence before changing the switching mode')

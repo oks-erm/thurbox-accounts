@@ -2,10 +2,12 @@
 import json
 import os
 from pathlib import Path
+import re
 import time
 import uuid
 
 from .accounts import account_env, private_dir
+from .core import atomic_write, dumps, redact
 from .guard import writer, update
 from .runtime import execute
 from .shared import Shared, real_directory
@@ -27,7 +29,9 @@ def verify(accounts, names):
     base = [accounts.claude.executable,'-p','--strict-mcp-config','--max-budget-usd','0.25']
     stage = 'initial synthetic conversation'
     record = None
+    step = 0
     def run(profile, extra, prompt, *, settings=None):
+        nonlocal step
         env = account_env(profile)
         env.update(THURBOX_ACCOUNTS_ROOT=str(store.root),THURBOX_ACCOUNTS_CONVERSATION=conversation,
             THURBOX_ACCOUNTS_PROFILE=profile['name'],THURBOX_ACCOUNTS_CLAUDE=accounts.claude.executable,
@@ -37,9 +41,20 @@ def verify(accounts, names):
             record['index'] = names.index(profile['name'])
             shared.save(record)
             argv = [str(launcher),*base[1:],*extra]
-        result = execute([*argv,prompt],folder,env=env,timeout=120,limit=65536)
+        # --tools/--allowedTools accept multiple values: a trailing prompt can
+        # be consumed as another tool. Put the positional prompt before options.
+        result = execute([argv[0], prompt, *argv[1:]],folder,env=env,timeout=120,limit=65536)
+        step += 1
+        evidence = dict(stage=stage, profile=profile['name'],
+                        **{key:result.get(key) for key in ('status','exit_code','truncated','duration')},
+                        stdout=redact(result.get('stdout','')), stderr=redact(result.get('stderr','')))
+        filename = f'{step:02d}-' + re.sub('[^a-z0-9]+','-',stage.lower()).strip('-') + '.json'
+        atomic_write(folder/filename, dumps(evidence))
         if result['status'] != 'PASS' or result['truncated']:
-            raise ValueError(f'Native shared proof failed at {stage}; account data unchanged. Synthetic evidence: {folder}')
+            detail = evidence['stderr'].strip() or evidence['stdout'].strip() or 'No native diagnostic returned'
+            raise ValueError(f'Native shared proof failed at {stage}: {detail[:1200]} '
+                             f'({result["status"]}, exit {result["exit_code"]}). '
+                             f'Account data unchanged. Synthetic evidence: {folder}')
         if record:
             shared.validate(record)
         return result['stdout']

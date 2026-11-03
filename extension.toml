@@ -23,6 +23,9 @@ path = "thurbox_accounts/__main__.py"
 path = "thurbox_accounts/accounts.py"
 
 [[files]]
+path = "thurbox_accounts/login.py"
+
+[[files]]
 path = "thurbox_accounts/accounts_ui.py"
 
 [[files]]

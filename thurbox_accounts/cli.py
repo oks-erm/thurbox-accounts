@@ -17,7 +17,7 @@ def parser():
     parser.add_argument('--thurbox-cli', default='thurbox-cli')
     parser.add_argument('--desktop-deadline',type=float,help=argparse.SUPPRESS)
     commands = parser.add_subparsers(dest='account_action', required=True)
-    for verb in ('add', 'login', 'status', 'start', 'verify-handoff'):
+    for verb in ('add', 'login', 'login-link', 'status', 'start', 'verify-handoff'):
         command = commands.add_parser(verb)
         command.add_argument('name')
         if verb == 'add':
@@ -42,10 +42,23 @@ def parser():
         if action == 'switch':
             command.add_argument('--expected-profile')
     commands.add_parser('sync-accounts')
+    verification_account = commands.add_parser('verify-account', help='Verify the current login of an existing conversation without sharing history')
+    verification_account.add_argument('--session', required=True)
+    verification_account.add_argument('--profile')
+    assignment = commands.add_parser('assign-account', help='Explicitly assign a named account when native login identity is unavailable')
+    assignment.add_argument('--session', required=True)
+    assignment.add_argument('--profile', required=True)
+    assignment.add_argument('--native', required=True)
+    assignment.add_argument('--cwd', required=True)
+    assignment.add_argument('--consent', action='store_true')
     simple_preview=commands.add_parser('simple-preview')
     simple_preview.add_argument('--session',required=True); simple_preview.add_argument('--to',required=True)
     simple_select=commands.add_parser('simple-select')
     simple_select.add_argument('--session',required=True); simple_select.add_argument('--to',required=True)
+    simple_select.add_argument('--consent',action='store_true')
+    simple_select.add_argument('--expected-source')
+    simple_select.add_argument('--expected-email')
+    simple_select.add_argument('--expected-org')
     simple_confirm=commands.add_parser('simple-confirm')
     simple_confirm.add_argument('token'); simple_confirm.add_argument('--consent',action='store_true')
     pane_state = commands.add_parser('pane-state')
@@ -95,6 +108,20 @@ def run(args):
     profiles = Profiles(args.accounts_dir)
     service = Accounts(profiles, Claude(args.claude), Thurbox([args.thurbox_cli]))
     verb = args.account_action
+    if verb == 'assign-account':
+        from .mode import Mode
+        print(dumps(Mode(service).verify_account(args.session, args.profile, assign=True,
+                                               native=args.native, cwd=args.cwd, consent=args.consent)))
+        return 0
+    if verb == 'verify-account':
+        from .mode import Mode
+        print(dumps(Mode(service).verify_account(args.session, args.profile)))
+        return 0
+    if verb == 'login-link':
+        from .login import link
+        value = link(profiles.get(args.name))
+        print(value if args.text else dumps({'url': value}))
+        return 0
     if verb in {'pane-state','pane-add','pane-run'}:
         from .pane import OPERATIONS, add, receipt, snapshot
         if verb == 'pane-state':
@@ -121,7 +148,9 @@ def run(args):
         from .simple import Simple
         simple=Simple(service)
         value=(simple.confirm(args.token,consent=args.consent) if verb=='simple-confirm' else
-               getattr(simple,'select' if verb=='simple-select' else 'preview')(args.session,args.to))
+               simple.select(args.session,args.to,consent=args.consent,expected_source=args.expected_source,
+                             expected_email=args.expected_email,expected_org=args.expected_org)
+               if verb=='simple-select' else simple.preview(args.session,args.to))
         print(dumps(value)); return 0
     if verb.startswith('mode-'):
         from .mode import Mode

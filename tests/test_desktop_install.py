@@ -24,7 +24,8 @@ class DesktopInstallTests(unittest.TestCase):
                 if '-o' in argv:
                     binary = Path(argv[argv.index('-o')+1]); binary.write_text('native executable'); binary.chmod(0o755)
                 return dict(status='PASS',truncated=False,stderr='',stdout='')
-            with patch('thurbox_accounts.desktop_install.execute',side_effect=execute):
+            with patch('thurbox_accounts.desktop_install.execute',side_effect=execute), \
+                 patch('thurbox_accounts.desktop_install.platform.system',return_value='Darwin'):
                 first = install(root,root/'accounts','/bin/sh','/bin/sh')
                 second = install(root,root/'accounts','/bin/sh','/bin/sh')
             self.assertIsNone(first['backup'])

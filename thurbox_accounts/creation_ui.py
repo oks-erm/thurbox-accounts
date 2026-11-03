@@ -63,4 +63,17 @@ def adapt(source, *, owned=False):
     if action:sub(1,12) == "new_session." and action ~= "new_session.open" and load() and not accounts_creation_allowed() then
       command("action",{text="settings.open"}); return true
     end''',1)
+    # Keep the name-to-agent transition self-contained: an older UI delivery
+    # can replace the owned picker block while retaining code outside it.
+    source = source.replace('accounts_default_agent()', '(thurbox and thurbox.agent_default)')
+    anchor = '  for index, agent in ipairs(list) do\n    if agent.name == (thurbox and thurbox.agent_default) then'
+    preferred = '''  local preferred = thurbox and thurbox.agent_default
+  if preferred == "claude" or preferred == "claude-accounts" then
+    for _, candidate in ipairs(list) do
+      if candidate.name:sub(1, #"Claude — ") == "Claude — " then preferred = candidate.name; break end
+    end
+  end
+  for index, agent in ipairs(list) do
+    if agent.name == preferred then'''
+    source = source.replace(anchor, preferred)
     return source.replace('frame("Coding Agent", height + 4,','frame("Agent / account", height + 4,')

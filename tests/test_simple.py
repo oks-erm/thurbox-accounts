@@ -46,6 +46,25 @@ class SimpleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'identity|UUID'):
             self.bootstrap()
 
+    def test_same_working_directory_with_normalized_trailing_slash_is_not_a_new_owner(self):
+        record=self.bootstrap()
+        record['primary_cwd']=str(self.root)+'/'
+        self.simple().row(record)
+
+    def test_named_session_reports_switching_on_from_creation(self):
+        from thurbox_accounts.pane import snapshot
+        self.bootstrap()
+        def call(*args):
+            if args[:2] == ('session', 'list'):
+                return {'sessions': list(self.tb.sessions.values())}
+            if args[:2] == ('session', 'get'):
+                return self.tb.sessions[args[2]]
+            return {}
+        with patch.object(self.tb, 'call', side_effect=call):
+            output = snapshot(self.accounts, self.owner)
+        row = next(line.split('\t') for line in output.splitlines() if line.startswith('conversation\t'))
+        self.assertEqual(row[-2], 'on')
+
     def test_stale_single_owner_cannot_restart_after_shared_enrollment(self):
         record=self.bootstrap(); record.update(kind='shared',allowed_session='new-owner')
         Shared(self.accounts).save(record)
@@ -60,8 +79,9 @@ class SimpleTests(unittest.TestCase):
         self.assertEqual([p['label'] for p in plan['accounts']],['Work A','Work B'])
         with self.assertRaisesRegex(ValueError,'consent'):
             self.simple().confirm(plan['id'])
-        with self.assertRaisesRegex(ValueError,'verify|compatibility'):
+        with self.assertRaisesRegex(ValueError,'history'):
             self.simple().confirm(plan['id'],consent=True)
+        self.assertFalse(any(c[:2]==('session','create') for c in self.tb.calls))
         self.assertFalse(any(c[:2]==('session','stop') for c in self.tb.calls))
         self.assertFalse((Path(self.store.get('b')['directory'])/'projects').exists())
 
@@ -107,8 +127,10 @@ class SimpleTests(unittest.TestCase):
 
     def test_confirm_safely_enrolls_single_history_and_launches_chosen_target(self):
         self.bootstrap(); path=self.history(); shared=Shared(self.accounts)
-        self.store.write('shared-proof.json',shared.proof_contract(['a','b']))
+        original=path.read_bytes()
+        self.tb.sessions[self.owner]['transcript_path']=None
         plan=self.simple().preview(self.owner,'b')
+        self.assertFalse(plan['proof_ready'])
         def pause(record,allow_idle=False):
             self.assertTrue(allow_idle)
             self.tb.sessions[self.owner]['stopped']=True
@@ -119,11 +141,52 @@ class SimpleTests(unittest.TestCase):
         record,index=launch.call_args.args
         self.assertEqual(index,1); self.assertEqual(record['conversation'],self.uuid)
         self.assertTrue(path.is_symlink()); self.assertEqual(record['profiles'],['a','b'])
+        self.assertEqual(Path(record['transcript']).read_bytes(),original)
+        self.assertEqual(Path(record['aliases'][1]['transcript']).read_bytes(),original)
         self.assertEqual(record['mode']['active_index'],0)
+        self.assertEqual(record['history_consent'],shared.proof_contract(['a','b']))
+        self.assertFalse(self.store.read('shared-proof.json'))
         with self.assertRaisesRegex(ValueError,'used'):
             self.simple().confirm(plan['id'],consent=True)
         with self.assertRaisesRegex(ValueError,'owner|shared'):
             self.bootstrap()
+
+    def test_return_from_second_account_preserves_messages_and_native_uuid(self):
+        self.tb.sessions[self.owner]['agent']='Claude — Work B'
+        self.simple().bootstrap('b',['--session-id',self.uuid],self.owner,self.root)
+        path=Path(self.store.get('b')['directory'])/'projects/-project'/(self.uuid+'.jsonl')
+        path.parent.mkdir(parents=True)
+        content='\n'.join(json.dumps(dict(type=role,sessionId=self.uuid,message=dict(role=role,content=text)))
+                          for role,text in [('user','Remember my work'),('assistant','I have the context')])+'\n'
+        path.write_text(content)
+        # Named-session rows can lack transcript_path; discover B's actual file.
+        self.tb.sessions[self.owner]['transcript_path']=None
+        def pause(record,allow_idle=False):
+            self.tb.sessions[self.owner]['stopped']=True
+            self.store.write('runtime-'+self.uuid+'.json',dict(owner=self.owner,phase='stopped',native_pid=None,turn='idle'))
+        with patch.object(Shared,'_pause',side_effect=pause), patch.object(Shared,'_launch',return_value=dict(profile='a',session='new-owner',conversation=self.uuid)) as launch:
+            result=self.simple().select(self.owner,'a',consent=True,expected_source='b',
+                                        expected_email='a@example.invalid',expected_org='a')
+        record,index=launch.call_args.args
+        self.assertEqual(result['conversation'],self.uuid)
+        self.assertEqual(record['profiles'][index],'a')
+        self.assertEqual(Path(record['transcript']).read_text(),content)
+        for alias in record['aliases']:
+            self.assertEqual(Path(alias['transcript']).read_text(),content)
+        self.assertFalse(any(c[:2]==('session','create') for c in self.tb.calls))
+
+    def test_build_changed_during_pause_never_moves_history_or_launches_target(self):
+        self.bootstrap(); path=self.history(); original=path.read_bytes()
+        plan=self.simple().preview(self.owner,'b')
+        def pause(record,allow_idle=False):
+            self.tb.sessions[self.owner]['stopped']=True
+            self.accounts.claude.fingerprint=lambda:'upgraded-during-pause'
+        with patch.object(Shared,'_pause',side_effect=pause), patch.object(Shared,'_launch') as launch:
+            with self.assertRaisesRegex(ValueError,'build changed'):
+                self.simple().confirm(plan['id'],consent=True)
+            launch.assert_not_called()
+        self.assertFalse(path.is_symlink())
+        self.assertEqual(path.read_bytes(),original)
 
     def test_expired_and_collision_plans_never_pause_source(self):
         self.bootstrap(); path=self.history(); shared=Shared(self.accounts)
@@ -158,12 +221,24 @@ class SimpleTests(unittest.TestCase):
 
     def test_select_previously_approved_account_uses_existing_consent_only(self):
         simple=self.simple()
-        approved=dict(id=self.uuid,approved=True,proof_ready=True)
+        approved=dict(id=self.uuid,approved=True,proof_ready=False)
         with patch.object(simple,'preview',return_value=approved), patch.object(simple,'confirm',return_value=dict(profile='b',session='replacement')) as confirm:
             self.assertTrue(simple.select(self.owner,'b')['completed'])
             confirm.assert_called_once_with(self.uuid,consent=True)
         with patch.object(simple,'preview',return_value=dict(approved=False,proof_ready=True)), patch.object(simple,'confirm') as confirm:
             self.assertFalse(simple.select(self.owner,'b')['approved'])
+            confirm.assert_not_called()
+
+    def test_destination_selection_can_approve_frozen_identities_without_a_probe(self):
+        self.bootstrap(); simple=self.simple()
+        with patch.object(simple,'confirm',return_value=dict(profile='b',session='replacement')) as confirm:
+            result=simple.select(self.owner,'b',consent=True,expected_source='a',
+                                 expected_email='b@example.invalid',expected_org='b')
+            self.assertTrue(result['completed']); confirm.assert_called_once()
+        with patch.object(simple,'confirm') as confirm:
+            with self.assertRaisesRegex(ValueError,'identity changed'):
+                simple.select(self.owner,'b',consent=True,expected_source='a',
+                              expected_email='different@example.invalid',expected_org='b')
             confirm.assert_not_called()
 
     def test_renamed_named_session_keeps_its_account_and_resumes(self):
@@ -230,7 +305,7 @@ class SimpleTests(unittest.TestCase):
         self.assertEqual(plan['profiles'],['a','b'])
         shared.remember_proof(shared.proof_contract(['a','b']))
         shared.remember_proof(shared.proof_contract(['a','c']))
-        self.assertTrue(self.simple().preview(self.owner,'a')['proof_ready'])
+        self.assertFalse(self.simple().preview(self.owner,'a')['proof_ready'])
 
     def test_valid_checks_for_other_account_groups_are_retained(self):
         shared=Shared(self.accounts); first=shared.proof_contract(['a','b'])

@@ -186,3 +186,32 @@ Validate unit/compile/distribution, `examples/inline_switch_smoke.py`, strip and
 guided-pane smokes, and `examples/shared_smoke.py --simple --desktop` plus legacy
 `--mode --desktop`. Inline UI smoke has synthetic receipts/no-op create only;
 tmux smoke uses real synthetic processes, not real Enterprise auth/model quota.
+
+## User-approved switching (current)
+
+The user explicitly removed the paid compatibility gate. A destination click in
+an account chooser with the visible sharing notice is scoped consent, pinned to
+the displayed source and target identity. `history_consent` stores the exact
+account/build contract on this conversation; never write a fabricated native proof
+or global proof cache. `require_consent` validates that contract for launch,
+switch, recovery and enabling mode. `verify-shared` remains an optional paid
+diagnostic, never run implicitly. This supersedes earlier proof-as-gate guidance.
+Worker/idle/quota, owner locks, history/sidecar and shutdown checks remain required.
+A missing transcript must never be treated as proof that a conversation is empty.
+Switching must preserve the native UUID and saved history, or refuse before any
+source pause or destination creation. Never silently create a fresh conversation
+as a fallback. Validate with `examples/one_click_switch_smoke.py` and backend tests.
+Successful switch receipts must include the destination Thurbox session id.
+The chooser follows that owner before closing so the next switch uses the latest
+conversation, rather than an earlier empty session with the same display name.
+After confirming the destination writer is running, retire only stopped previous
+owners with the same native UUID, cwd and expected agent using session delete
+--soft. Never force-delete, remove history/worktrees or retire the current owner.
+Persist pending retirement ids before launch for recovery; cleanup failure is a
+notice on a successful switch, never a failed handoff.
+A missed foreground PostToolUse may be reconciled only after an explicit native
+main-turn snapshot of background tasks and scheduled work, followed by an
+independent idle_prompt with no background tasks, subagents or scheduled work.
+New prompts/tools/agents invalidate the snapshot. Quota alone, missing history,
+an old snapshot or a user-visible empty task display do not clear runtime evidence.
+Report missing completion as unconfirmed tracking, not proof of running work.

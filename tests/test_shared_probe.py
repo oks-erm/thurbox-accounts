@@ -11,9 +11,21 @@ from thurbox_accounts.accounts import Accounts, Claude, Profiles
 from thurbox_accounts.shared_probe import verify
 from thurbox_accounts.thurbox import Thurbox
 
-SYNTHETIC = '''import json, os, re, subprocess, sys
+SYNTHETIC = '''import argparse, json, os, re, subprocess, sys
 from pathlib import Path
 args=sys.argv[1:]
+if '--session-id' in args:
+    parser=argparse.ArgumentParser()
+    parser.add_argument('-p',action='store_true')
+    parser.add_argument('--strict-mcp-config',action='store_true')
+    parser.add_argument('--max-budget-usd')
+    parser.add_argument('--session-id')
+    parser.add_argument('--tools',nargs='*')
+    parser.add_argument('prompt',nargs='?')
+    parsed=parser.parse_args(args)
+    if not parsed.prompt:
+        print('Input must be provided as a prompt; --tools consumed the trailing prompt',file=sys.stderr)
+        raise SystemExit(1)
 profile=Path(os.environ['CLAUDE_CONFIG_DIR'])
 if args[:2]==['auth','status']:
     print(json.dumps(dict(loggedIn=True,authMethod='claude.ai',configDirectory=str(profile),email=profile.name+'@example.invalid',orgId=profile.name)))
@@ -49,6 +61,27 @@ print(marker)
 
 
 class SharedProbeTests(unittest.TestCase):
+    def test_initial_failure_exposes_native_error_and_saves_redacted_evidence(self):
+        from test_accounts import FakeClaude, FakeThurbox
+        with tempfile.TemporaryDirectory() as directory:
+            store = Profiles(Path(directory)/'accounts')
+            store.add('a'); store.add('b')
+            native = FakeClaude(); native.executable = '/fixture/claude'
+            accounts = Accounts(store, native, FakeThurbox())
+            error = dict(status='FAIL', exit_code=1, truncated=False, duration=.1,
+                         stdout='', stderr='Rate limit reached; secret=sk-'+'a'*30)
+            with patch('thurbox_accounts.shared_probe.execute', return_value=error):
+                with self.assertRaisesRegex(ValueError, 'Rate limit reached') as failure:
+                    verify(accounts, ['a','b'])
+            self.assertNotIn('sk-'+'a'*30, str(failure.exception))
+            evidence = list((store.root/'probes').glob('*/01-*.json'))
+            self.assertEqual(len(evidence), 1)
+            data = json.loads(evidence[0].read_text())
+            self.assertEqual(data['stage'], 'initial synthetic conversation')
+            self.assertEqual(data['exit_code'], 1)
+            self.assertIn('[REDACTED]', data['stderr'])
+            self.assertFalse(store.read('shared-proof.json'))
+
     def test_complete_probe_uses_guard_and_recovers_after_refused_launch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

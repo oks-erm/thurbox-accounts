@@ -23,7 +23,8 @@ class Simple:
         row=self.tb.call('session','get',record['allowed_session'])
         expected_agent=record['source_agent'] if record.get('kind')=='single' else 'claude-accounts'
         if (row.get('agent') != expected_agent or row.get('agent_session_id') != record['conversation']
-                or row.get('cwd') != record.get('primary_cwd',record['cwd']) or row.get('host')
+                or not isinstance(row.get('cwd'),str)
+                or Path(row['cwd']) != Path(record.get('primary_cwd',record['cwd'])) or row.get('host')
                 or row.get('backend_type') not in {None,'tmux','local:tmux'}):
             raise ValueError('Conversation identity, UUID, owner or local backend changed')
         return row
@@ -140,16 +141,14 @@ class Simple:
             prepared_names=[p['name'] for p in prepared]
             if len(prepared_names)==len(names) and set(prepared_names)==set(names): names=prepared_names
         contract=self.shared.proof_contract(names)
-        if record.get('kind')=='single' and not self.shared.has_proof(contract):
-            reverse=list(reversed(names)); reverse_contract=self.shared.proof_contract(reverse)
-            if self.shared.has_proof(reverse_contract): names,contract=reverse,reverse_contract
         for p in names: self.accounts.check_launch(self.store.get(p))
         snapshot={k:record.get(k) for k in ('conversation','allowed_session','kind','cwd','primary_cwd','native_dirs','source_agent','identity','index','profiles','mode')}
         return row,record,current,names,contract,snapshot
 
     def preview(self, session, target):
         row,record,current,names,contract,snapshot=self._selection(session,target)
-        approved=record.get('kind')!='single' and target in record['profiles']
+        approved=(record.get('kind')!='single' and target in record['profiles'] and
+                  (record.get('history_consent')==contract or self.shared.has_proof(contract)))
         plan=dict(id=str(uuid.uuid4()),expires_at=time.time()+300,session=row['id'],target=target,
                   conversation=record['conversation'],name=record.get('name',row.get('name',row['id'])),
                   source_profile=current,profiles=names,contract=contract,snapshot=snapshot,
@@ -158,9 +157,14 @@ class Simple:
         self.store.write('simple-plan-'+plan['id']+'.json',plan)
         return plan
 
-    def select(self, session, target):
+    def select(self, session, target, *, consent=False, expected_source=None, expected_email=None, expected_org=None):
         plan=self.preview(session,target)
-        if plan['approved'] and plan['proof_ready']:
+        if consent:
+            selected = next(p for p in plan['accounts'] if p['name'] == target)
+            if (plan['source_profile'] != expected_source or selected.get('email') != expected_email
+                    or (selected.get('orgId') or '') != expected_org):
+                raise ValueError('The displayed account identity changed; refresh the account chooser')
+        if consent or plan['approved']:
             return dict(completed=True,**self.confirm(plan['id'],consent=True))
         return plan
 
@@ -175,8 +179,8 @@ class Simple:
                 row,record,current,names,contract,snapshot=self._selection(plan['session'],plan['target'])
                 if snapshot!=plan['snapshot'] or contract!=plan['contract']:
                     raise ValueError('Conversation owner or account identities changed; review again')
-                self.shared.require_proof(names)
-                # No source shutdown before proof, identities and launch checks succeed.
+                # Explicit confirmation approves this frozen account group.
+                # Native identities and launch checks precede source shutdown.
                 if record.get('kind')=='single':
                     self._preflight_history(row,record,names)
                 elif names!=record['profiles']:
@@ -184,18 +188,22 @@ class Simple:
                 self.row(record)
                 plan['used']=True; self.store.write('simple-plan-'+token+'.json',plan)
                 self.shared._pause(record,allow_idle=True)
+                if self.shared.proof_contract(names) != contract:
+                    raise ValueError('Account identities or Claude build changed while stopping the source. History is unchanged; review the switch again.')
                 if record.get('kind')=='single':
                     result=self.shared.enroll(row['id'],names,consent=True,launch=False,
-                        mode=dict(enabled=True,active_index=names.index(current)),name=record.get('name'),guarded_source=True,transition_held=True)
+                        mode=dict(enabled=True,active_index=names.index(current)),name=record.get('name'),guarded_source=True,transition_held=True,expected_contract=contract)
                     return self.shared._launch(result,names.index(plan['target']))
                 if names!=record['profiles']:
                     self._extend(record,names,contract)
+                else:
+                    record['proof']=contract; record['history_consent']=contract; self.shared.save(record)
                 return self.shared._launch(record,names.index(plan['target']))
 
     def _preflight_history(self, row, record, names):
         path=Path(row.get('transcript_path') or self.transcript(record) or '')
         if not path.is_absolute() or not path.is_file():
-            raise ValueError('Send the first message before switching; no native history exists yet')
+            raise ValueError('The saved history for this conversation could not be located. The original is preserved; no new session was started. Re-select the original conversation before switching.')
         for name in names:
             if name==record['profiles'][0]: continue
             base=Path(self.store.get(name)['directory'])/'projects'/path.parent.name
@@ -218,7 +226,7 @@ class Simple:
     def _extend(self, record, names, contract):
         self.shared.validate(record)
         aliases=self._extension_aliases(record,names)
-        record.update(profiles=names,proof=contract,phase='enrolling',aliases=record['aliases']+aliases)
+        record.update(profiles=names,proof=contract,history_consent=contract,phase='enrolling',aliases=record['aliases']+aliases)
         self.shared.save(record)  # Recovery evidence before cross-account aliases.
         try:
             for alias in aliases:

@@ -51,6 +51,73 @@ class ModeTests(unittest.TestCase):
         from thurbox_accounts.mode import Mode
         return Mode(self.accounts)
 
+    def test_verify_existing_account_while_running_without_model_calls_or_switching(self):
+        from thurbox_accounts.pane import snapshot
+        self.tb.sessions['ordinary']['stopped'] = False
+        with patch('thurbox_accounts.shared_probe.verify', side_effect=AssertionError('no model check')):
+            value = self.mode().verify_account('ordinary')
+        self.assertEqual(value['profile'], 'a')
+        self.assertFalse(self.store.read('bindings.json'))
+        self.assertFalse(self.store.read(Shared(self.accounts).key(UUID)))
+        output = snapshot(self.accounts, 'ordinary')
+        self.assertIn('indicator\tordinary\tclaude\tWork%20A\trunning', output)
+        self.tb.sessions['ordinary']['agent_session_id'] = '99999999-9999-4999-8999-999999999999'
+        self.assertIn('indicator\tordinary\tclaude\tunverified', snapshot(self.accounts, 'ordinary'))
+
+    def test_manual_account_selection_requires_matching_native_identity(self):
+        with self.assertRaisesRegex(ValueError, 'match'):
+            self.mode().verify_account('ordinary', profile='b')
+        self.assertFalse(self.store.read('verified-accounts.json'))
+
+    def test_signed_in_without_native_identity_is_explained_and_not_assigned(self):
+        status = self.accounts.claude.status
+        def missing(profile):
+            value = status(profile)
+            if profile['name'] == 'source': value.update(email=None, orgId=None)
+            return value
+        with patch.object(self.accounts.claude, 'status', side_effect=missing):
+            with self.assertRaisesRegex(ValueError, 'signed in, but returns no email'):
+                self.mode().verify_account('ordinary', profile='a')
+        self.assertFalse(self.store.read('verified-accounts.json'))
+
+    def test_explicit_assignment_handles_missing_identity_without_claiming_verification(self):
+        status = self.accounts.claude.status
+        def missing(profile):
+            value = status(profile)
+            if profile['name'] == 'source': value.update(email=None, orgId=None)
+            return value
+        with patch.object(self.accounts.claude, 'status', side_effect=missing):
+            with self.assertRaisesRegex(ValueError, 'consent'):
+                self.mode().verify_account('ordinary', profile='a', assign=True, native=UUID, cwd=str(self.root))
+            result = self.mode().verify_account('ordinary', profile='a', assign=True,
+                                               native=UUID, cwd=str(self.root), consent=True)
+            self.assertFalse(result['verified'])
+            self.assertTrue(result['assigned'])
+            plan = self.mode().preview('ordinary', ['a','b'])
+            self.assertEqual(plan['source_profile'], 'a')
+            self.assertTrue(plan['source_assignment']['assigned'])
+            self.enable(plan['id'])
+        record = Shared(self.accounts).load(UUID)
+        self.assertEqual(record['profiles'][record['index']], 'a')
+
+    def test_assignment_cannot_override_a_known_different_account(self):
+        with self.assertRaisesRegex(ValueError, 'match'):
+            self.mode().verify_account('ordinary', profile='b', assign=True, native=UUID,
+                                       cwd=str(self.root), consent=True)
+        self.assertFalse(self.store.read('verified-accounts.json'))
+
+    def test_assignment_respects_known_organization_even_without_email(self):
+        status = self.accounts.claude.status
+        def partial(profile):
+            value = status(profile)
+            if profile['name'] == 'source': value.update(email=None, orgId='b')
+            return value
+        with patch.object(self.accounts.claude, 'status', side_effect=partial):
+            with self.assertRaisesRegex(ValueError, 'match'):
+                self.mode().verify_account('ordinary', profile='a', assign=True, native=UUID,
+                                           cwd=str(self.root), consent=True)
+        self.assertFalse(self.store.read('verified-accounts.json'))
+
     def enable(self, token):
         def launch(record,index,**kwargs):
             record.update(phase='active',allowed_session='managed')
@@ -109,11 +176,14 @@ class ModeTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.enable(plan['id'])
         self.assertEqual(target.read_text(),'keep'); self.assertFalse(self.path.is_symlink())
 
-    def test_missing_proof_is_not_run_implicitly_and_source_stays_untouched(self):
+    def test_missing_proof_does_not_block_explicitly_approved_setup(self):
         self.store.write('shared-proof.json',{})
         plan=self.mode().preview('ordinary',['a','b'])
         self.assertFalse(plan['proof_ready'])
-        with self.assertRaisesRegex(ValueError,'verify|compatibility'): self.enable(plan['id'])
+        with patch('thurbox_accounts.shared_probe.verify', side_effect=AssertionError('no paid checks')):
+            self.enable(plan['id'])
+        record=Shared(self.accounts).load(UUID)
+        self.assertEqual(record['history_consent'],plan['contract'])
         self.assertFalse(self.path.is_symlink())
 
     def test_consent_expiration_and_one_use_are_enforced(self):

@@ -57,6 +57,15 @@ class Shared:
             raise ValueError('Shared switching disabled: run verify-shared for this ordered account group after login; native resume/compaction proof is required')
         return contract
 
+    def require_consent(self, record):
+        """Validate scoped sharing approval without spending model allowance."""
+        contract = self.proof_contract(record['profiles'])
+        if record.get('proof') != contract:
+            raise ValueError('Account identities or Claude build changed; review sharing approval again')
+        if record.get('history_consent') != contract and not self.has_proof(contract):
+            raise ValueError('This conversation needs explicit sharing approval for these accounts')
+        return contract
+
     def _proof_key(self, contract):
         digest=hashlib.sha256(json.dumps(contract,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         return 'proof-cache-'+digest+'.json'
@@ -100,10 +109,12 @@ class Shared:
                 if not path.is_symlink() or path.resolve() != Path(record[key]):
                     raise ValueError('Shared history reference was replaced; preserved for manual recovery')
 
-    def enroll(self, source, names, *, consent=False, launch=True, mode=None, name=None, expected_digest=None, mode_plan=None, guarded_source=False, transition_held=False):
+    def enroll(self, source, names, *, consent=False, launch=True, mode=None, name=None, expected_digest=None, mode_plan=None, guarded_source=False, transition_held=False,expected_contract=None):
         if not consent:
             raise ValueError('Explicit consent is required to share this conversation with the selected accounts')
-        proof = self.require_proof(names)
+        proof = self.proof_contract(names)
+        if expected_contract is not None and proof != expected_contract:
+            raise ValueError('Account identities or Claude build changed; review sharing approval again')
         if guarded_source:
             from .simple import Simple
             row, binding, path, digest = Simple(self.accounts).source(source)
@@ -147,9 +158,11 @@ class Shared:
             if mode_plan is not None:
                 from .mode import Mode
                 Mode(self.accounts)._unchanged(mode_plan)
+            if self.proof_contract(names) != proof:
+                raise ValueError('Account identities or Claude build changed during enrollment; history is unchanged')
             record = dict(conversation=conversation, project=path.parent.name, cwd=row['cwd'],
                 transcript=str(canonical), sidecars=str(sidecars), aliases=aliases, profiles=names,
-                proof=proof, index=names.index(binding['profile']), phase='enrolling',
+                proof=proof, history_consent=proof, index=names.index(binding['profile']), phase='enrolling',
                 allowed_session='', reservation='', original_session=row['id'], original_sha256=digest)
             if guarded_source:
                 record.update(cwd=prior['cwd'],primary_cwd=prior.get('primary_cwd',row['cwd']),native_dirs=prior.get('native_dirs',[]))
@@ -188,7 +201,7 @@ class Shared:
         self.validate(record)
         if record.get('is_probe'):
             raise ValueError('Synthetic proof histories cannot be enrolled as managed conversations')
-        self.require_proof(record['profiles'])
+        self.require_consent(record)
         target = self.accounts.authenticated(record['profiles'][index])
         self.accounts.check_launch(target)
         if not writer_available(self.store, record['conversation']):
@@ -203,7 +216,13 @@ class Shared:
         if record.get('source_snapshot') and not record.get('mode_setup_complete'):
             from .mode import Mode
             Mode(self.accounts).validate_prepared(record)
+        previous_owner = record.get('allowed_session')
         owner = record['allowed_session'] if recover else str(uuid.uuid4())
+        pending = list(record.get('retire_pending', []))
+        for predecessor in (previous_owner, record.get('original_session')):
+            if predecessor and predecessor != owner and predecessor not in pending and predecessor not in record.get('retired_sessions', []):
+                pending.append(predecessor)
+        record['retire_pending'] = pending
         record.update(index=index, phase='switching', allowed_session=owner,
                       reservation=record['reservation'] if recover else uuid.uuid4().hex)
         self.save(record)  # Durable reservation rejects old/competing managed starts.
@@ -240,6 +259,12 @@ class Shared:
                         self.tb.call('session','focus',owner)
                     except (OSError,ValueError,RuntimeError,TimeoutError):
                         result['notice'] = 'Account resumed; select the new session in Thurbox manually'
+                    try:
+                        cleanup_notice = self.retire_previous(record)
+                    except (OSError,ValueError,RuntimeError,TimeoutError):
+                        cleanup_notice = 'Switched successfully; the previous session entry could not be retired yet.'
+                    if cleanup_notice:
+                        result['notice'] = (result.get('notice', '') + ' ' + cleanup_notice).strip()
                     return result
                 if state.get('owner') == owner and state.get('error'):
                     raise ValueError(state['error'])
@@ -250,6 +275,47 @@ class Shared:
             self.save(record)
             raise
 
+    def retire_previous(self, record):
+        """Hide stopped predecessors only after the replacement owns the writer.
+
+        Soft deletion preserves worktrees and native/shared history. Cleanup is
+        optional maintenance and must never turn a successful launch into failure.
+        """
+        state = self._runtime(record['conversation'])
+        if (record.get('phase') != 'active' or state.get('owner') != record.get('allowed_session')
+                or state.get('phase') != 'running'):
+            return 'Previous entries were kept because the replacement is not confirmed running.'
+        self.validate(record)
+        pending, retired = [], list(record.get('retired_sessions', []))
+        agents = {'claude', AGENT} | {'Claude — ' + self.store.get(name)['label'] for name in record['profiles']}
+        for owner in record.get('retire_pending', []):
+            if owner == record['allowed_session']:
+                continue
+            try:
+                try:
+                    source = self.tb.call('session','get',owner)
+                except RuntimeError:
+                    deleted = self.tb.call('session','list','--deleted').get('sessions', [])
+                    if any(row.get('id') == owner and row.get('agent_session_id') == record['conversation'] for row in deleted):
+                        if owner not in retired: retired.append(owner)
+                        continue
+                    raise
+                if (source.get('stopped') is not True or source.get('agent_session_id') != record['conversation']
+                        or source.get('agent') not in agents or source.get('host')
+                        or not isinstance(source.get('cwd'),str)
+                        or Path(source['cwd']) != Path(record.get('primary_cwd', record['cwd']))):
+                    pending.append(owner)
+                    continue
+                answer = self.tb.call('session','delete',owner,'--soft')
+                if answer.get('soft') is not True:
+                    raise ValueError('Thurbox did not confirm undoable session retirement')
+                if owner not in retired: retired.append(owner)
+            except (OSError,ValueError,RuntimeError,TimeoutError,KeyError):
+                pending.append(owner)
+        record.update(retire_pending=pending, retired_sessions=retired)
+        self.save(record)
+        return 'Switched successfully; some previous session entries were kept for inspection.' if pending else ''
+
     def switch(self, conversation, *, expected_profile=None):
         conversation = identifier(conversation)
         with self.store.lock('transition-' + conversation):
@@ -259,7 +325,7 @@ class Shared:
             if record['phase'] != 'active':
                 raise ValueError('Shared conversation needs recovery; use recover-shared ' + conversation)
             self.validate(record)
-            self.require_proof(record['profiles'])
+            self.require_consent(record)
             next_index = (record['index']+1) % len(record['profiles'])
             if expected_profile and record['profiles'][next_index] != expected_profile:
                 raise ValueError('Next account changed; refresh shared status before switching')
@@ -288,6 +354,10 @@ class Shared:
                     time.sleep(.1); continue
                 if state.get('background_tools'):
                     raise ValueError('Background shell/task completion is unconfirmed. Finish it in native Claude before switching; the source remains running')
+                if state.get('tools'):
+                    raise ValueError(f'Native completion was not received for {len(state["tools"])} foreground tool(s). '
+                                     'This can be a stale tracking marker; it does not prove a tool is still running. '
+                                     'A fresh native task snapshot and idle notification are needed. The source remains running.')
                 raise ValueError('Source is working, awaiting permission, or has no proven usage-limit stop; it remains running')
             if state.get('phase') == 'stopped' and not state.get('native_pid'):
                 from .guard import safe_state

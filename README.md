@@ -47,27 +47,32 @@ installer never grants them. The dialogs link to Settings if permission is missi
 ## Start and switch accounts
 
 1. **F7 → Add account → Log in.** Repeat for each account with a distinct name.
-2. Optional, before using up either account: **Prepare switching…**, choose the
-   accounts, and review the compatibility check. It uses synthetic model requests
-   and account allowance; it never sends an existing conversation. Valid checks
-   are reused for the same accounts and native build.
+   Use **Open sign-in page** above the native terminal to open the complete SSO
+   URL when its printed link wraps. The temporary link is removed when login ends.
+2. Sign in to the other account once. The optional compatibility diagnostic is
+   available for troubleshooting; it is not required for switching.
 3. **Ctrl+N**, choose your project/name, then **Claude — Work A** in **Agent / account**.
    The conversation shows **Account: Work A** from startup.
-4. Click **Switch account** in the conversation strip and choose **Work B**.
-   The first switch asks which accounts/organizations may access this history.
-   Later switches to those approved accounts continue directly.
+4. Click **Switch account** and choose **Work B**. The chooser identifies the
+   accounts and explains that choosing one approves its access to this history.
+   There is no extra trust screen or synthetic model call.
 
-No separate switching-mode setup or second terminal is needed for these named
-sessions. Working tools, background jobs, scheduled wakeups and permission prompts
-block switching. Usage-limit switches use the guarded quota signal. An idle switch
-can wait about a minute for Claude's independent idle notification; a Stop hook
-alone can continue generation and is not treated as proof of idle.
+Working tools, background jobs, scheduled wakeups and permission prompts block a
+history switch. Usage-limit switches use the guarded quota signal. An idle history
+switch may wait for Claude's independent idle notification. Switching must locate the saved native history. A missing transcript is not
+treated as an empty conversation; the original remains intact and no replacement
+session is opened.
 
-If compatibility was not checked before an account reached its limit, the initial
-check may fail until that account is available. The UI explains this and leaves
-the conversation on its current account. Use the named choices for new work;
-`claude (default / unmanaged)` retains Thurbox's original login and requires the
-advanced attachment flow below. Codex uses its default account.
+No paid check or source-account allowance is required. Account identities, native
+build, local ownership and history aliases are still checked. Approval is stored
+for the exact conversation/account group; it is never presented as a passed native
+compatibility test. The optional **compatibility diagnostics** action still uses
+synthetic model requests when explicitly requested.
+
+After the destination owns the conversation, stopped predecessor session entries
+are soft-deleted automatically. Shared history and worktrees are preserved; the
+session list keeps the current owner. Cleanup failures leave the switch active
+and show a notice instead of rolling back a working conversation.
 
 A recognized stock/owned New session pane is adapted with a backup. Custom edits
 are preserved and installation explains how to restore the stock pane before
@@ -148,23 +153,33 @@ another computer.
 
 ## Advanced: attach older unguarded conversations
 
+To identify the current account only, select the conversation and choose
+**F7 → Advanced conversations → Verify current account automatically**. You can
+also select **Assign account as…** and confirm the named account yourself when
+Claude returns a signed-in status with no email identity. This is shown as
+**(assigned)**; it does not claim that Claude reported the identity and does not
+change the running login. A known different identity or existing binding cannot
+be overridden. The explicit assignment can be used by the later switching setup,
+whose sharing review identifies it as user-assigned. This works while running, uses no model
+requests and leaves its launcher, history and switching mode unchanged. Changed
+session identity or named-account identity invalidates the saved label.
+
 1. Select your existing Claude conversation in Thurbox's session list. Finish any
    tools, shell jobs and subagents before setup. In a second WSL terminal, park
    the conversation safely with `thurbox-cli session stop CONVERSATION_NAME`.
    This keeps its history and checkout. Do not stop a session with work still running.
 2. Press **F7**. The pane shows that existing conversation, even if Accounts did
-   not create it. Click **Turn switching mode On…**, then choose the accounts in
-   switching order and **Review and enable mode…**.
-3. Review exactly which accounts/organizations can use its context. If a native
-   compatibility check is needed, the pane asks separately before spending account
-   allowance. An account already at its limit can block this initial check; the
-   mode stays Off and explains why. A valid saved check is reused.
+   not create it. Click **Set up this older conversation…**, then choose the accounts and
+   **Review and enable switching…**.
+3. Review which accounts/organizations may use its history and approve sharing.
+   No synthetic compatibility test or allowance from the source is required.
 4. Approve setup. The pane prepares the history and focuses a guarded session
    named after the original with **(switchable)** and a short unique suffix.
-   Click its named **Switch to ACCOUNT** button whenever needed.
+   Setup selects and focuses this verified conversation automatically; the old
+   original keeps its files and stays stopped. Click **Switch account…** whenever needed.
 5. **Turn switching Off** keeps the current account running and blocks further
    account switches, including the CLI. **Turn switching On** restores the same
-   approved group without another paid check while its proof remains valid.
+   approved group while its account/build approval remains valid.
 
 Selecting an account under **Logins / new conversations** only selects it for
 login and new work; it does not change the account of an existing conversation.
@@ -192,16 +207,22 @@ thurbox-accounts add work-a
 thurbox-accounts login work-a
 thurbox-accounts add work-b
 thurbox-accounts login work-b
-thurbox-accounts verify-shared work-a work-b
+# Optional paid diagnostic, not required to switch:
+# thurbox-accounts verify-shared work-a work-b
 ```
 
 Log in to each Enterprise account in its native browser/SSO flow. `verify-shared`
 uses **synthetic model requests and your account allowance**: six top-level calls
 for two profiles, plus a subagent, with `--max-budget-usd 0.25` per top-level call.
 It checks the exact Claude build, account identities, same-UUID resume, guarded
-restart, writer contention, failure recovery, sidecars and compaction. Sharing
-stays disabled if any check fails; rerun after changing accounts/order or Claude.
-Run this while both accounts still have available allowance.
+restart, writer contention, failure recovery, sidecars and compaction. This is an optional diagnostic; switching uses explicit sharing approval rather
+than requiring a successful paid test. Run diagnostics only while both accounts
+have available allowance.
+
+If a check fails, its message includes Claude's diagnostic. Each synthetic step
+saves redacted stdout/stderr, status and exit code in the reported private
+`probes/UUID` directory. A failed diagnostic is not a switching gate; inspect the reported error before
+retrying the diagnostic. Earlier versions could report an empty evidence directory.
 
 ## Enable a conversation once
 
@@ -222,10 +243,12 @@ Use the new guarded session returned by the command; leave the original stopped.
 
 ## Switch when the account reaches its limit
 
-Open **F7**, click **Conversations**, select the shared conversation and click **Switch to ACCOUNT**. The pane shows the next account before switching. Switches cycle the
-approved order, stop the source and resume the same conversation under the next
-account. There is **no per-switch fork, history copy or extra model request**;
-restored context is used when you next send a prompt.
+Click **Switch account** above the conversation and choose the destination.
+The chooser identifies the account and organization; choosing it approves access
+to this conversation. The source stops at a safe point, the same native UUID and
+history resume under the destination, and the UI follows that session. There is
+no per-switch fork, history copy, paid diagnostic or extra model request.
+Restored context is used when you next send a prompt.
 
 CLI equivalent:
 
@@ -274,5 +297,5 @@ python3.11 examples/shared_smoke.py --desktop --thurbox-cli /path/to/thurbox-cli
 The live smoke uses real Thurbox/tmux with synthetic accounts, without LLM calls.
 Real Enterprise SSO, native cross-account shared history and quota detection have
 not been verified in this development run: no real profiles are configured here.
-`verify-shared` is required before enabling shared history. Synthetic smoke results
+The paid `verify-shared` diagnostic is optional; history sharing requires explicit approval. Synthetic smoke results
 do not certify native Enterprise behavior.
