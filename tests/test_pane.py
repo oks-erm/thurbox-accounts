@@ -44,6 +44,17 @@ class PaneTests(unittest.TestCase):
         self.assertNotIn('{',receipt('pane-add',dict(name='work',label='Work')))
         self.assertIn('check',receipt('desktop-send',dict(notice='check before retrying',submitted=None)))
 
+    def test_mode_setup_receipt_keeps_the_new_owner_for_the_ui_handoff(self):
+        from thurbox_accounts.pane import receipt
+        output = receipt('mode-enable', dict(session='guarded-owner', profile='work-a'))
+        self.assertIn('mode-enabled\tguarded-owner\twork-a', output)
+
+    def test_switch_receipt_keeps_destination_session_for_selection(self):
+        from thurbox_accounts.pane import receipt
+        for operation, value in [('simple-select',dict(completed=True,profile='a',session='new-owner')),
+                                 ('simple-confirm',dict(profile='a',session='new-owner'))]:
+            self.assertEqual(receipt(operation,value), 'switch-complete\ta\tnew-owner')
+
     def test_ui_operation_wrapper_reuses_backend_and_suppresses_json(self):
         from thurbox_accounts.cli import main
         import contextlib, io

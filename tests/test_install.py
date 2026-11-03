@@ -114,3 +114,18 @@ class InstallTests(unittest.TestCase):
                 registry.write_text(text.replace(str(native),str(root/'custom.json')))
                 with self.assertRaisesRegex(ValueError,'custom edits'):
                     register(adapter,guard)
+
+    def test_stale_runtime_is_refused_before_it_can_rewrite_a_newer_pane(self):
+        from thurbox_accounts.install import install_checkout
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source, home, launcher, ui, calls, call = self.fixture(root)
+            (source/'extension.toml').write_text('name="thurbox-accounts"\n[[files]]\npath="runtime.py"\n')
+            (source/'runtime.py').write_text('new runtime')
+            (home/'runtime.py').write_text('old runtime')
+            with patch('thurbox_accounts.install.Thurbox') as adapter, patch('thurbox_accounts.install.execute') as execute:
+                adapter.return_value.call.side_effect = call
+                with self.assertRaisesRegex(RuntimeError, 'Runtime delivery mismatch for runtime.py'):
+                    install_checkout('/bin/sh', root/'data', 'claude', root/'bin', source=source)
+                execute.assert_not_called()
+                self.assertEqual(calls, [('extension','install',str(source))])

@@ -22,8 +22,12 @@ from thurbox_accounts.accounts_ui import install
 def main():
     root = Path(tempfile.mkdtemp(prefix='tbx-guided-', dir='/tmp')).resolve()
     config = root / 'config'; config.mkdir()
+    os.environ.pop('THURBOX_UI_INSTANCE', None)
+    runtime = root/'runtime'; runtime.mkdir(mode=0o700)
+    os.environ['XDG_RUNTIME_DIR'] = str(runtime)
     os.environ.update(THURBOX_CONFIG_DIR=str(config), THURBOX_DATA_DIR=str(root/'data'),
-                     THURBOX_SOCKET='tbx-guided-'+uuid.uuid4().hex[:12])
+                     THURBOX_SOCKET='tbx-guided-'+uuid.uuid4().hex[:12],
+                     XDG_DATA_HOME=str(root/'xdg-data'), XDG_CACHE_HOME=str(root/'cache'))
     (config/'settings.toml').write_text('[features]\nauto_update=false\nversion_check=false\nautomations=false\nnotifications=false\n')
     cli = str(Path.home()/'.local/bin/thurbox-cli')
     def call(*args):
@@ -45,7 +49,10 @@ def main():
     plan_missing = receipt('mode-preview',plan)
     prefix = 'local PLAN = '+json.dumps(plan_ready)+'\nlocal MISSING = '+json.dumps(plan_missing)+'\n'
     prefix += 'local run = function(key, cmd, opts) if key:match("^accounts%-operation") then state.test_command = cmd; state.test_answer = cmd:find("mode%-preview") and PLAN or nil end end\n'
+    prefix += 'local command = function(verb, opts) state.test_action=verb=="action" and opts.text or state.test_action; if verb=="open" then state.test_url=opts.text end end\n'
     source = prefix + source
+    login_url='https://claude.ai/oauth/authorize?state='+'x'*400+'&code_challenge=fixture'
+    source=source.replace('local answer = (thurbox.runs or {})[key]', 'local answer = {ok=true,stdout='+json.dumps(login_url)+'}')
     source = source.replace('local function result() return (thurbox.runs or {})[state.request_key or "none"] end',
         'local function result() if state.request_key then return {state="done",ok=true,stdout=state.test_answer or "Fixture complete"} end end')
     source = source.replace('local answer = (thurbox.runs or {})[data_key()]',
@@ -65,7 +72,7 @@ def main():
     source = source.replace('dispatch = function(id)', 'dispatch = function(id)\n  if id == "accounts.test-native-change" then state.conversation="managed"; state.selection_base="before"; store.selected="after"; state.test_fixture=UNSUPPORTED; state.request_key=nil; state.test_command=nil; return true end\n  if id == "accounts.test-unresolved" then state.conversation=nil; state.test_fixture=UNRESOLVED; state.request_key=nil; state.test_command=nil; return true end\n  if id == "accounts.test-shared" then state.test_fixture=SHARED_ON; state.screen="conversations"; state.conversation=nil; state.request_key=nil; state.test_command=nil; return true end\n  if id == "accounts.test-missing" then state.test_answer=MISSING; return true end\n  if id == "accounts.test-populated" then state.test_fixture = '+json.dumps(fixture)+'; state.request_key=nil; state.test_command=nil; state.screen="accounts"; state.focus=1; return true end\n  if id == "accounts.test-login" then state.login_profile="work-a"; return true end\n  if id == "accounts.test-added" then state.account="work-a"; state.added_label="Work B"; return true end')
     source = source.replace('local function projects()','local function projects() if state.test_fixture then return {"/fixture/one","/fixture/two","/fixture/three"} end')
     source = source.replace('return ui.panel({ title = "Claude Accounts", focused = ctx.focused, body = children })', 'local y=1; for _, node in ipairs(children) do if node.id=="mode-on" or node.id=="mode-off" then state.test_toggle_row=y end; if node.id=="switch" then state.test_switch_row=y end; if node.id=="create" then state.test_create_row=y end; if node.id=="new-form" and state.new_form then state.test_cancel_row=y end; y=y+(node.len or 0) end; state.test_height=ctx.height; return ui.panel({ title = "Claude Accounts", focused = ctx.focused, body = children })')
-    source = source.replace('on_action = dispatch,' , 'on_action = dispatch, ui_state = function() return {focus=state.focus, test_command=state.test_command and state.test_command:sub(-230), sharing=table.concat(state.sharing or {}, ","), pending=pending_review() and pending_review().kind, profiles=pending_review() and table.concat(pending_review().profiles, ","), login_profile=state.login_profile, nickname=state.nickname and state.nickname.value, create_row=state.test_create_row, cancel_row=state.test_cancel_row, height=state.test_height, toggle_row=state.test_toggle_row, switch_row=state.test_switch_row, selected=account(model()) and account(model()).name, target=conversation(model()) and conversation(model()).id} end,')
+    source = source.replace('on_action = dispatch,' , 'on_action = dispatch, ui_state = function() return {focus=state.focus, test_command=state.test_command and state.test_command:sub(-230), sharing=table.concat(state.sharing or {}, ","), pending=pending_review() and pending_review().kind, profiles=pending_review() and table.concat(pending_review().profiles, ","), login_profile=state.login_profile, test_action=state.test_action, test_url=state.test_url, nickname=state.nickname and state.nickname.value, create_row=state.test_create_row, cancel_row=state.test_cancel_row, height=state.test_height, toggle_row=state.test_toggle_row, switch_row=state.test_switch_row, selected=account(model()) and account(model()).name, target=conversation(model()) and conversation(model()).id} end,')
     source = source.replace('commands = {', 'commands = {\n    {action="accounts.test-populated",desc="Fixture"},\n    {action="accounts.test-login",desc="Fixture login"},\n    {action="accounts.test-added",desc="Fixture added"},\n    {action="accounts.test-missing",desc="Fixture missing proof"},\n    {action="accounts.test-shared",desc="Fixture shared mode"},\n    {action="accounts.test-native-change",desc="Fixture changed selection"},\n    {action="accounts.test-unresolved",desc="Fixture missing owner"},')
     path.write_text(source)
     assert call('plugin','check')['ok']
@@ -112,9 +119,7 @@ def main():
         resize(10); os.kill(process.pid,signal.SIGWINCH); time.sleep(.3)
         action('confirm'); assert pane().get('pending') and pane()['test_command']==preview_command
         resize(40,120); os.kill(process.pid,signal.SIGWINCH); time.sleep(.3)
-        action('test-missing'); action('confirm'); assert pane()['test_command']==preview_command
-        action('mode-verify'); assert pane()['pending']=='verify'
-        action('cancel'); action('enable'); action('confirm')
+        action('test-missing'); action('confirm')
         assert "'mode-enable' '99999999-9999-4999-8999-999999999999' '--consent'" in pane()['test_command']
         action('test-shared'); resize(20); os.kill(process.pid,signal.SIGWINCH); time.sleep(.3)
         assert pane()['toggle_row'] <= pane()['height']-2 and pane()['switch_row'] <= pane()['height']-2, pane()
@@ -126,21 +131,20 @@ def main():
         else: raise AssertionError('Off switch action was accepted')
         assert pane()['test_command']==off_command
         action('mode-on'); assert "'mode-on' '--session' 'managed'" in pane()['test_command']
-        action('switch'); assert "'switch' '--session' 'managed' '--expected-profile' 'work-b'" in pane()['test_command']
+        action('switch'); assert pane()['test_action']=='account-switch.open', pane()
         action('test-native-change'); assert not pane().get('target'), pane()
         action('test-unresolved'); assert not pane().get('target'), pane()
         action('test-populated')
-        action('test-login'); os.write(master,b'\x1b[18~'); time.sleep(.3)
+        action('test-login'); key('tab'); key('enter'); assert pane()['test_url']==login_url, pane()
+        os.write(master,b'\x1b[18~'); time.sleep(.3)
         assert not pane().get('login_profile'), pane()
-        action('new-form')
-        resize(20); os.kill(process.pid,signal.SIGWINCH); time.sleep(.3)
-        assert pane()['create_row'] <= pane()['height']-2, pane()
-        assert pane()['cancel_row'] <= pane()['height']-2, pane()
+        action('new-form'); assert pane()['test_action']=='new_session.open', pane()
         (root/'terminal.bin').write_bytes(output)
         assert not (config/'ui.json').exists() or not json.loads((config/'ui.json').read_text()).get('trusted')
         print(json.dumps(dict(ok=True, artifacts=str(root), real_tui=True, fake_operations=True,
-            keyboard_add=True, explicit_confirmation=True, small_confirmation_blocked=True, login_f7_back=True, mode_off_on_controls=True, missing_proof_blocked=True)))
+            keyboard_add=True, explicit_confirmation=True, small_confirmation_blocked=True, login_f7_back=True, mode_off_on_controls=True, no_paid_gate=True)))
     finally:
+        (root/'terminal.bin').write_bytes(output)
         os.killpg(process.pid,signal.SIGTERM)
         try: process.wait(timeout=5)
         except subprocess.TimeoutExpired: os.killpg(process.pid,signal.SIGKILL); process.wait()

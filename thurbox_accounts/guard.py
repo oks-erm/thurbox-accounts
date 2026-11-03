@@ -68,19 +68,24 @@ def apply_event(state, event, payload):
     background = dict(state.get('background_tools',{}))
     tool_input = payload.get('tool_input') or {}
     response = payload.get('tool_response') or {}
+    if event in {'UserPromptSubmit','PreToolUse','SubagentStart'}:
+        state['native_idle_snapshot'] = False
     if not isinstance(tool_input,dict):
         raise ValueError('Native tool input must be an object; background completion is unconfirmed')
-    if event == 'Stop' and 'background_tasks' in payload:
+    if event in {'Stop','StopFailure'} and 'background_tasks' in payload:
         tasks = payload['background_tasks']
         if (not isinstance(tasks,list) or len(tasks)>1000
                 or any(not isinstance(t,dict) or not isinstance(t.get('id'),str) or not t['id'] for t in tasks)):
             raise ValueError('Native background task registry is invalid; completion is unconfirmed')
         background = {'native:'+t['id']:t['id'] for t in tasks}
-    if event == 'Stop':
+    if event in {'Stop','StopFailure'}:
+        state['native_idle_snapshot'] = (isinstance(payload.get('background_tasks'),list)
+                                         and isinstance(payload.get('session_crons'),list))
         jobs=payload.get('session_crons')
         if jobs is not None and (not isinstance(jobs,list) or len(jobs)>1000 or any(not isinstance(t,dict) or not t.get('id') for t in jobs)):
             raise ValueError('Native scheduled work registry is invalid')
-        state.update(scheduled_work=jobs or [],scheduled_work_unknown=jobs is None)
+        if event == 'Stop' or jobs is not None:
+            state.update(scheduled_work=jobs or [],scheduled_work_unknown=jobs is None)
     tool = payload.get('tool_use_id')
     agent = payload.get('agent_id')
     if event == 'UserPromptSubmit':
@@ -117,9 +122,17 @@ def apply_event(state, event, payload):
         agents.discard(agent)
     elif event == 'Notification':
         kind=payload.get('notification_type')
+        if (kind=='idle_prompt' and state.get('turn') in {'idle','quota'}
+                and state.get('native_idle_snapshot') and not agents and not background
+                and not state.get('scheduled_work_unknown',True) and not state.get('scheduled_work')
+                and not state.get('blocked') and not state.get('uncertain') and not state.get('error')):
+            # A main-turn task snapshot plus a later independent native idle
+            # notification proves foreground completion even if one PostToolUse
+            # hook was missed. Quota alone or an old snapshot cannot do this.
+            tools.clear()
         if kind=='idle_prompt' and state.get('turn')=='idle' and not state.get('scheduled_work_unknown',True):
             state['turn']='prompt'
-        elif kind=='quota_auto_resume_fired': state['turn']='working'
+        elif kind=='quota_auto_resume_fired': state.update(turn='working',native_idle_snapshot=False)
     elif event in {'Stop','StopFailure'}:
         # Stop hooks can themselves request another turn. An API rate-limit
         # StopFailure is notification-only and cannot keep that turn running.
@@ -311,7 +324,7 @@ def main(argv=None):
         elif record.get('kind') == 'single':
             shared.validate(record)
         else:
-            shared.require_proof(record['profiles'])
+            shared.require_consent(record)
         profile = accounts.authenticated(profile_name)
         if record['profiles'][record['index']] != profile_name:
             raise ValueError('Managed account profile does not match the reserved owner')

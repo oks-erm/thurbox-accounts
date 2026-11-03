@@ -55,7 +55,7 @@ def main():
                accounts=[dict(name='a',label='Work A',email='a@example.invalid',orgId='Org A'),dict(name='b',label='Work B',email='b@example.invalid',orgId='Org B')])
     plan=receipt('simple-preview',value); value['proof_ready']=False; missing=receipt('simple-preview',value)
     s='local FIXTURE='+json.dumps(fixture)+'\nlocal PLAN='+json.dumps(plan)+'\nlocal MISSING='+json.dumps(missing)+'\n'+s
-    s=s.replace('-- Conversation account strip', 'local run=function(key,cmd,opts) if key:match("^account%-switch%-") then state.test_command=cmd; state.test_answer=cmd:find("simple%-select") and (state.missing and MISSING or PLAN) or "Done" end end\n-- Conversation account strip',1)
+    s=s.replace('-- Conversation account strip', 'local run=function(key,cmd,opts) if key:match("^account%-switch%-") then state.test_command=cmd; state.test_answer=cmd:find("simple%-select") and (state.missing and MISSING or PLAN) or "switch-complete\\tb\\tfixture-target" end end\n-- Conversation account strip',1)
     s=s.replace('local answer = (thurbox.runs or {})[key]','local answer = {state="done",ok=true,stdout=FIXTURE}')
     s=s.replace('local function result() return (thurbox.runs or {})[state.request_key or "none"] end','local function result() if state.request_key then return {state="done",ok=not state.test_error,stdout=state.test_answer or "Done",stderr=state.test_error and "Synthetic failure" or nil} end end')
     s=s.replace('  for _, row in ipairs(thurbox.sessions or {}) do if row.id == selected then session = row; break end end','  session={id=selected,agent="Claude — Work A"}')
@@ -107,16 +107,14 @@ def main():
         assert projection()['ready'],projection()
         action('account-switch.confirm'); assert "'simple-confirm'" in projection()['test_command'] and not projection()['open'],projection()
         action('account-switch.test-missing'); key(b'\r')
-        action('account-switch.confirm'); assert "'simple-select'" in projection().get('test_command',''),state()
-        key(b'\r')  # Review compatibility notice, no paid call yet
+        action('account-switch.confirm'); assert "'simple-confirm'" in projection().get('test_command',''),state()
         assert "'verify-shared'" not in projection().get('test_command',''),state()
-        action('account-switch.verify'); assert "'verify-shared' 'a' 'b'" in projection().get('test_command',''),state()
         action('account-switch.test-open'); key(b'\r'); action('account-switch.test-change')
         before=projection()['test_command']; action('account-switch.confirm'); assert projection()['test_command']==before,projection()
         key(b'\x1b'); action('account-switch.test-open'); key(b'\r'); action('account-switch.test-error')
         assert projection()['open']; key(b'\x1b'); assert not projection()['open']
         (root/'state.json').write_text(json.dumps(state(),indent=2)); (root/'terminal.bin').write_bytes(output)
-        print(json.dumps(dict(ok=True,root=str(root),real_tui=True,ctrl_n_account_picker=True,inline_switch=True,small_screen_blocks_consent=True,paid_check_review=True,stale_selection_refused=True,no_auth_models_or_grants=True)))
+        print(json.dumps(dict(ok=True,root=str(root),real_tui=True,ctrl_n_account_picker=True,inline_switch=True,small_screen_blocks_consent=True,no_paid_gate=True,stale_selection_refused=True,no_auth_models_or_grants=True)))
     finally:
         (root/"terminal.bin").write_bytes(output)
         print("Fixture artifacts:",root)

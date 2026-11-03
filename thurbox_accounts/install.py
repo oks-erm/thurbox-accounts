@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import tomllib
 
 from .agent_install import register, register_profiles
 from .runtime import execute
@@ -29,6 +30,13 @@ def install_checkout(command, accounts_dir, claude, bin_dir, *, source=None):
         launcher = home / 'bin/thurbox-accounts'
         if not home.is_absolute() or not launcher.is_file() or not os.access(launcher, os.X_OK):
             raise ValueError('Thurbox did not return a usable installed launcher')
+        # A stale runtime can remove helpers from a newer owned Lua pane while
+        # leaving their call sites behind. Verify delivery before running it.
+        for item in tomllib.loads((source/'extension.toml').read_text()).get('files', []):
+            relative = item['path']
+            origin, delivered = source/relative, home/relative
+            if not delivered.is_file() or origin.read_bytes() != delivered.read_bytes():
+                raise ValueError(f'Runtime delivery mismatch for {relative}. Run {source}/bin/thurbox-accounts install from this checkout.')
 
         stage = 'Prepare and validate Accounts pane'
         print('[2/4] Prepare and validate Accounts pane…', file=sys.stderr, flush=True)

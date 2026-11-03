@@ -38,8 +38,9 @@ thurbox-accounts ui-install
 
 Use the [colleague guide](QUICKSTART.md) for the normal flow: sign in through
 **F7**, create a named account session through **Ctrl+N**, then click **Switch account**
-in its conversation strip. Accounts also offers a separately confirmed compatibility
-check before allowance is exhausted. It never silently runs model requests.
+in its conversation strip. Choosing the destination is scoped sharing consent;
+no paid compatibility test is required. Accounts offers optional diagnostics
+which consume allowance only after explicit approval.
 
 The installer delivers the account panes plus a checked adapter for the stock
 New session picker. It backs up recognized files, refuses custom edits, and
@@ -49,7 +50,7 @@ reload. New session needs Sessions permission; Accounts needs Run/Program, and
 account-status/account-switch need Run, granted by the user in Interface settings.
 
 New named sessions are guarded from their first turn. First switching approval is
-specific to the source/target accounts and organizations. No terminal stop command
+specific to the source/target accounts and organizations shown in the chooser. No terminal stop command
 or separate mode setup is required. Idle switching waits for an independent native
 idle notification; the guard refuses tools/background jobs/scheduled work/unknown
 completion. Existing unguarded sessions retain the advanced mode workflow below.

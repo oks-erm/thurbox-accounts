@@ -41,8 +41,13 @@ local function ask(args, long)
 end
 local function model()
   local answer = (thurbox.runs or {})[data_key()]
-  local m = { accounts = {}, conversations = {}, ready = false }
-  if not answer or answer.state ~= "done" then return m end
+  local m = { accounts = {}, conversations = {}, assigned = {}, ready = false }
+  if not answer or answer.state ~= "done" then
+    if state.last_model_selection == store.selected and state.last_model then
+      return state.last_model
+    end
+    return m
+  end
   if not answer.ok then m.error = answer.stderr or answer.error or "Account helper unavailable"; return m end
   m.ready = true
   for row in (answer.stdout or ""):gmatch("[^\r\n]+") do
@@ -56,7 +61,10 @@ local function model()
     elseif f[1] == "current" then m.current = f[2]
     elseif f[1] == "unsupported" then m.unsupported = f[3]
     elseif f[1] == "proof" then m.proof = f[2] end
+    if f[1] == "account-assignment" then m.assigned[f[2]] = true end
   end
+  state.last_model = m
+  state.last_model_selection = store.selected
   return m
 end
 local function account(m)
@@ -118,6 +126,9 @@ local function launch_login(p)
   args[#args + 1] = "login"; args[#args + 1] = p.name
   state.account = p.name
   state.login_profile = p.name
+  state.login_number = (state.login_number or 0) + 1
+  state.login_url = nil
+  state.login_button_focused = false
   command("program", { text = "accounts-" .. p.name, repo = EXECUTABLE, args = args })
 end
 local function navigate(screen) state.screen = screen; state.focus = 1; state.message = nil; state.pending = nil end
@@ -144,19 +155,55 @@ local function mode_review()
     elseif f[1] == "mode-account" and #f == 5 and pending then
       pending.profiles[#pending.profiles + 1] = f[2]
       pending.identities[f[2]] = f[3] .. " — " .. f[4] .. " — " .. f[5]
+    elseif f[1] == "mode-source-assigned" and pending then pending.source_assigned = true
     end
   end
   return pending
 end
 local function pending_review() return state.pending or mode_review() end
+local function follow_mode_setup()
+  local answer = result()
+  local resume = state.setup_after_check
+  if resume and resume.request == state.request_key and answer and answer.state == "done" then
+    state.setup_after_check = nil
+    if answer.ok then
+      local args = { "mode-preview", "--session", resume.source }
+      for _, name in ipairs(resume.profiles) do args[#args + 1] = "--profile"; args[#args + 1] = name end
+      ask(args)
+      return
+    end
+  end
+  if not answer or answer.state ~= "done" or not answer.ok or state.setup_completed == state.request_key then return end
+  local owner, profile = (answer.stdout or ""):match("^mode%-enabled\t([^\t\r\n]+)\t([^\t\r\n]+)")
+  if not owner then return end
+  state.setup_completed = state.request_key
+  state.setup_owner = decode(owner)
+  state.setup_profile = decode(profile)
+  state.message = "Account verified and switching is On. Continue in the new (switchable) conversation."
+  -- Do not steal focus if the user selected different work during setup.
+  if store.selected == state.setup_selected then
+    store.selected = state.setup_owner
+    state.conversation = state.setup_owner
+    state.selection_base = state.setup_owner
+    state.screen = "conversations"
+    command("focus", { text = "agent" })
+  end
+end
 local function submit_confirmation()
   local p = pending_review()
   if not p or not ready_to_confirm or p.token ~= displayed_confirmation then return end
   state.pending = nil; state.focus = 1
   if p.kind == "modeenable" then
+    state.setup_selected = store.selected
     ask({ "mode-enable", p.token, "--consent" }); state.screen = "conversations"
+  elseif p.kind == "assign" then
+    ask({ "assign-account", "--session", p.source, "--profile", p.profile,
+          "--native", p.native, "--cwd", p.cwd, "--consent" })
   elseif p.kind == "verify" then
     local args = { "verify-shared" }; for _, name in ipairs(p.profiles) do args[#args + 1] = name end; ask(args, true)
+    if p.resume_source then
+      state.setup_after_check = { request = state.request_key, source = p.resume_source, profiles = p.profiles }
+    end
   elseif p.kind == "enable" then
     local args = { "enable-shared", "--session", p.source, "--consent" }
     for _, arg in ipairs(profile_args(p.profiles)) do args[#args + 1] = arg end
@@ -165,6 +212,10 @@ local function submit_confirmation()
 end
 
 dispatch = function(id)
+  if id == "open-login" or id == "accounts.open-login" then
+    if state.login_profile and state.login_url then command("open", { text = state.login_url }) end
+    return true
+  end
   if id == "accounts.open" then
     if state.login_profile then state.login_profile = nil; state.screen = "accounts"; refresh(); command("focus", { text = "accounts" })
     else state.conversation = nil; state.screen = "accounts"; command("focus", { text = "accounts", toggle = true }) end
@@ -178,27 +229,36 @@ dispatch = function(id)
   if id == "confirm" then submit_confirmation(); return true end
   local m, p = model(), account(model()); local c = conversation(m)
   if id == "refresh" then refresh()
-  elseif id == "accounts" or id == "conversations" then navigate(id)
+  elseif id == "accounts" or id == "conversations" then
+    if id == "conversations" then state.conversation = nil; state.selection_base = nil end
+    navigate(id)
   elseif id == "normal-new" then command("action", { text = "new_session.open" })
   elseif id == "prepare" then navigate("prepare"); state.sharing = {}; for _, item in ipairs(m.accounts) do if item.saved then local names=state.sharing; names[#names+1]=item.name; state.sharing=names end end
   elseif id == "add-form" then state.add_form = not state.add_form; state.focus = 1
   elseif id == "add" then state.added_label = value("nickname"); ask({ "pane-add", value("nickname") })
   elseif id == "login" then launch_login(p)
   elseif id == "status" and p then ask({ "status", p.name })
+  elseif (id == "verify-account" or id == "verify-as") and c then
+    local args = { "verify-account", "--session", c.id }
+    if id == "verify-as" and p then args[#args + 1] = "--profile"; args[#args + 1] = p.name end
+    ask(args)
+  elseif id == "assign-account" and c and c.external and p and p.saved then
+    state.confirmation_number = (state.confirmation_number or 0) + 1
+    state.pending = { kind = "assign", token = state.confirmation_number,
+      source = c.id, native = c.conversation, cwd = c.cwd, title = c.name,
+      profile = p.name, profiles = {p.name}, identities = {[p.name] = p.label .. " — " .. p.email} }
+    state.focus = 1
   elseif id == "new-form" then
-    if not p or not p.saved then navigate("accounts"); state.message = "Choose an account and click Log in before starting a conversation."
-    else state.screen = "conversations"; state.new_form = not state.new_form; state.focus = 1 end
-  elseif id == "create" and p then
-    local folder = value("repo", default_folder())
-    if folder == "" then state.message = "Choose a project below or paste its folder path."; return true end
-    local name = value("title"); if name == "" then name = p.label .. " - " .. (folder:gsub("/+$", ""):match("[^/]+$") or "Conversation") end
-    ask({ "start", p.name, "--repo", folder, "--name", name }); state.new_form = false
+    command("action", { text = "new_session.open" })
+  elseif id == "create" then command("action", { text = "new_session.open" }); state.new_form = false
   elseif (id == "open" or id == "open-conversation") and c then store.selected = c.id; command("focus", { text = "agent" })
   elseif id == "stop" and c then start_confirmation("stop", m)
   elseif id == "resume" and c then ask({ "desktop-start", c.id })
   elseif id == "mode-off" and c and c.shared then ask({ "mode-off", "--session", c.id })
   elseif id == "mode-on" and c and c.shared then ask({ "mode-on", "--session", c.id })
-  elseif id == "switch" and c and c.shared and c.mode ~= "off" and c.next ~= "" then ask({ "switch", "--session", c.id, "--expected-profile", c.next })
+  elseif id == "switch" and c and c.mode ~= "off" then
+    store.selected = c.id
+    command("action", { text = "account-switch.open" })
   elseif id == "recover" and c and c.conversation ~= "" then ask({ "recover-shared", c.conversation })
   elseif id == "sharing" and c then navigate("sharing")
   elseif id == "mode-verify" then
@@ -206,7 +266,7 @@ dispatch = function(id)
     if review then
       state.confirmation_number = (state.confirmation_number or 0) + 1
       state.pending = {kind = "verify", token = state.confirmation_number, profiles = review.profiles,
-        identities = review.identities, title = review.title}
+        identities = review.identities, title = review.title, resume_source = review.source}
       state.focus = 1
     end
   elseif id == "verify" or id == "enable" then
@@ -248,8 +308,12 @@ return {
     { action = "accounts.conversations", desc = "Show account conversations" },
     { action = "accounts.add-form", desc = "Add another account" },
     { action = "accounts.add", desc = "Add the named account" },
+    { action = "accounts.open-login", desc = "Open the complete native SSO link in your browser" },
     { action = "accounts.login", desc = "Log in to the selected account" },
     { action = "accounts.status", desc = "Check selected account login" },
+    { action = "accounts.verify-account", desc = "Find the current account of an existing conversation" },
+    { action = "accounts.assign-account", desc = "Review assigning a named account to an older conversation" },
+    { action = "accounts.verify-as", desc = "Verify an existing conversation against the selected named account" },
     { action = "accounts.new-form", desc = "Start a new account conversation" },
     { action = "accounts.create", desc = "Create the configured conversation" },
     { action = "accounts.open-conversation", desc = "Open selected conversation" },
@@ -265,6 +329,7 @@ return {
   },
   pills = { { action = "accounts.open", label = "Accounts", priority = 10 } },
   render = function(ctx)
+    follow_mode_setup()
     controls = {}; width = math.max(16, (ctx.width or 80) - 4); ready_to_confirm = false; displayed_confirmation = nil
     local children = {}
     local function add(node) children[#children + 1] = node end
@@ -278,12 +343,24 @@ return {
       click("Open Settings", "settings"); click("Back to conversation", "accounts.open")
     elseif state.login_profile then
       say("Sign in to " .. state.login_profile .. " using the native Claude prompt and browser below.")
+      local key = "accounts-login-link-" .. tostring(state.login_number or 0)
+      run(key, BASE .. " login-link " .. quote(state.login_profile) .. " --text", { machine = "local", timeout = 5, ttl = 1 })
+      local answer = (thurbox.runs or {})[key]
+      state.login_url = answer and answer.ok and (answer.stdout or ""):match("^(https://[^\r\n]+)") or nil
+      if state.login_url then
+        click("Open sign-in page", "open-login")
+        say("This button uses the complete link, even when the terminal wraps it. Tab then Enter opens it.")
+      else say("Waiting for Claude's sign-in link…") end
       click("Done / Back to accounts (F7)", "done-login")
       add({ type = "surface", program = "accounts-" .. state.login_profile })
     else
       run(data_key(), BASE .. " pane-state" .. (store.selected and " --session " .. quote(store.selected) or ""), { machine = "local", timeout = 30, ttl = 3 })
       local m = model(); local p, c = account(m), conversation(m)
       if m.indicator then say(m.indicator) end
+      local operation = result()
+      if operation and operation.state == "done" and not operation.ok then
+        say("Account operation failed: " .. (operation.stderr or operation.error or "No diagnostic returned"):sub(1,1500))
+      end
       if not m.ready then
         say(m.error and "Couldn't connect to the account helper installed in this terminal." or "Loading your accounts…")
         if m.error then
@@ -294,29 +371,30 @@ return {
         click("Refresh", "refresh"); click("Back to conversation", "accounts.open")
       elseif pending_review() then
         local pending = pending_review()
-        say(pending.kind == "verify" and "Check these accounts before enabling switching?" or (pending.kind == "enable" or pending.kind == "modeenable") and "Enable switching mode for this conversation?" or "Stop this conversation?")
+        say(pending.kind == "assign" and "Assign this account to the conversation?" or pending.kind == "verify" and "Check these accounts before enabling switching?" or (pending.kind == "enable" or pending.kind == "modeenable") and "Enable switching mode for this conversation?" or "Stop this conversation?")
         if pending.title then say("Conversation: " .. pending.title) end
+        if pending.kind == "modeenable" then
+          say((pending.source_assigned and "Account assigned by you: " or "Verified current account: ") .. (pending.identities[pending.source_profile] or pending.source_profile))
+          say("Reviewing has not enabled switching yet. Approve below to finish setup.")
+        end
         local rows = 0; for _, node in ipairs(children) do rows = rows + node.len end
         for index, name in ipairs(pending.profiles) do
           local identity = pending.identities and pending.identities[name] or name
           if not pending.identities then for _, item in ipairs(m.accounts) do if item.name == name then identity = name .. " — " .. item.email end end end
           local node = line(tostring(index) .. ". " .. identity); add(node); rows = rows + node.len
         end
-        local explanation = pending.kind == "verify" and "This uses account allowance for synthetic checks (six requests plus a subagent for two accounts, up to $0.25 per top-level request). It does not send an existing conversation. It may take several minutes."
+        local explanation = pending.kind == "assign" and "Claude does not report the original login identity. You are selecting this account yourself. This sets an assigned label; it does not change the running login, share history or send model requests. Switching setup separately asks which accounts may access this history."
+          or pending.kind == "verify" and "This uses account allowance for synthetic checks (six requests plus a subagent for two accounts, up to $0.25 per top-level request). It does not send an existing conversation. It may take several minutes."
           or (pending.kind == "enable" or pending.kind == "modeenable") and "These accounts and their organizations can use this conversation's context. Only this history and its sidecars are shared. Logins stay separate. This approval applies to later one-click switches."
           or "Stop only after tools and subagents finish. Conversation history is retained."
         if pending.kind == "modeenable" then
           explanation = explanation .. " An untracked original keeps its files; already account-managed history uses the existing move/link setup. Off later prevents switches without erasing prior access."
-          if not pending.proof_ready then explanation = explanation .. " Compatibility check is required first; an exhausted account can block it." end
+          explanation = explanation .. " No synthetic model check is required."
         end
         local node = line(explanation); add(node); rows = rows + node.len
         ready_to_confirm = (ctx.height or 0) >= rows + 7
         displayed_confirmation = pending.token
-        if pending.kind == "modeenable" and not pending.proof_ready then
-          ready_to_confirm = false
-          if (ctx.height or 0) >= rows + 7 then click("Review compatibility check…", "mode-verify")
-          else say("Enlarge this pane to read the compatibility notice.") end
-        elseif ready_to_confirm then click(pending.kind == "verify" and "Run compatibility check" or (pending.kind == "enable" or pending.kind == "modeenable") and "Allow switching for these accounts" or "Stop conversation", "confirm")
+        if ready_to_confirm then click(pending.kind == "assign" and "Assign selected account" or pending.kind == "verify" and "Run compatibility check" or (pending.kind == "enable" or pending.kind == "modeenable") and "Allow switching for these accounts" or "Stop conversation", "confirm")
         else say("Enlarge this pane to read all details before continuing.") end
         click("Cancel", "cancel")
       else
@@ -325,7 +403,7 @@ return {
         elseif state.message then say(state.message)
         else
           local answer = result()
-          if answer and answer.state == "done" then say((answer.ok and answer.stdout or answer.stderr or answer.error or "Operation failed"):sub(1, 500)) end
+          if answer and answer.state == "done" and answer.ok then say((answer.stdout or "Operation complete"):sub(1, 500)) end
         end
         if (state.screen or "accounts") == "accounts" then
           say(#m.accounts == 0 and "1. Add your first account" or "Add or sign in to accounts here. Choose an account in New session (Ctrl+N).")
@@ -339,9 +417,15 @@ return {
             add(input("nickname", "Account name")); click("Add account", "add")
           end
           if p then say("Finish browser/SSO login, then use Ctrl+N to start work.") end
-          if #m.accounts > 1 then click("Prepare switching…", "prepare") end
+          if #m.accounts > 1 then click("Optional compatibility diagnostics…", "prepare") end
         elseif state.screen == "sharing" or state.screen == "prepare" then
           say(state.screen == "prepare" and "Prepare these accounts for switching before they reach their limits" or "Set up switching for " .. (c and c.name or "a conversation"))
+          if state.screen == "sharing" and c and c.external then
+            say("Current account: " .. (c.profile == "" and "unverified" or label(m, c.profile) .. ((m.assigned or {})[c.id] and " (assigned)" or "")))
+            click("Verify current account automatically", "verify-account")
+            if p and p.saved then click("Assign account as " .. p.label .. "…", "assign-account") end
+            say("This identifies the login only. No paid compatibility check or stop is needed.")
+          end
           say("Select accounts below in the order you want to use them.")
           local names = group(m)
           for _, item in ipairs(page_rows(m.accounts, state.account_page)) do
@@ -349,8 +433,8 @@ return {
             click((order and tostring(order) .. ". " or "+ ") .. item.label, "share:" .. item.name)
           end
           if #m.accounts > 4 then click("More accounts", "more-accounts") end
-          say("Check compatibility once, then approve sharing for this conversation.")
-          click("Check compatibility…", "verify"); if state.screen ~= "prepare" then click("Review and enable mode…", "enable") end
+          say("Select the accounts and approve sharing. Switching does not run paid test prompts.")
+          if state.screen == "prepare" then click("Run optional diagnostic check…", "verify") else click("Review and enable switching…", "enable") end
           if state.screen ~= "prepare" and c and not c.stopped then say("Finish tools and shell jobs, then stop this conversation in Thurbox before enabling."); if not c.external then click("Stop conversation…", "stop") end end
           if state.screen == "prepare" then click("Back to accounts", "accounts") else click("Back to conversations", "conversations") end
         else
@@ -367,16 +451,21 @@ return {
             if #m.conversations > 4 then click("More conversations", "more-conversations") end
             if c then
               say("Conversation: " .. c.name)
-              say((c.shared and c.phase ~= "active" and "Last confirmed account: " or "Current account: ") .. ((c.external or c.profile == "") and "unverified" or label(m, c.profile)) .. " | " .. (c.stopped and "Stopped" or "Running"))
-              say("Account switching: " .. (c.shared and c.phase ~= "active" and "Needs recovery" or c.shared and c.mode ~= "off" and "On" or "Off"))
+              say((c.shared and c.phase ~= "active" and "Last confirmed account: " or "Current account: ") .. (c.profile == "" and "unverified" or label(m, c.profile) .. ((m.assigned or {})[c.id] and " (assigned)" or "")) .. " | " .. (c.stopped and "Stopped" or "Running"))
+              if c.external then
+                click("Verify current account automatically", "verify-account")
+                if p and p.saved then click("Assign account as " .. p.label .. "…", "assign-account") end
+                say("Account verification works while running and uses no model requests. Switching setup is separate.")
+              end
+              say("Account switching: " .. (c.shared and c.phase ~= "active" and "Needs recovery" or c.mode ~= "off" and "On" or "Off"))
               if c.shared and c.phase == "active" then click(c.mode == "off" and "Turn switching On" or "Turn switching Off", c.mode == "off" and "mode-on" or "mode-off") end
-              if c.shared and c.mode ~= "off" and c.phase == "active" and c.next ~= "" then click("Switch to " .. label(m, c.next), "switch") end
+              if c.mode ~= "off" and c.phase == "active" then click("Switch account…", "switch") end
               if c.phase == "failed" or c.phase == "switching" then click("Recover conversation", "recover")
               elseif c.external then click("Back to this conversation", "open")
               elseif c.stopped then click("Resume conversation", "resume") else click("Open conversation", "open"); click("Stop conversation…", "stop") end
-              if not c.shared then click("Turn switching mode On…", "sharing") end
+              if not c.shared and c.mode == "off" then click("Set up this older conversation…", "sharing") end
             else say("Start a conversation here to use it with your selected account.") end
-            if p then click("New conversation using " .. p.label, "new-form") else say("Add and log in to an account first.") end
+            if p then click("New session — choose main account…", "new-form") else say("Add and log in to an account first.") end
 
           end
         end
@@ -389,13 +478,20 @@ return {
   ui_state = function()
     local m = model(); local c = conversation(m); local p = pending_review()
     return { conversation = c and c.id, current_profile = c and c.profile,
-      switching_mode = c and c.shared and (c.mode == "off" and "off" or "on") or "off",
+      switching_mode = c and (c.mode == "off" and "off" or "on") or "off",
       pending = p and p.kind, busy = busy() }
   end,
   on_action = dispatch,
   on_click = function(hit) if hit.id then return dispatch(hit.id) end return false end,
   on_key = function(key)
-    if state.login_profile then return false end
+    if state.login_profile then
+      if key.key == "tab" then state.login_button_focused = true; return true end
+      if key.key == "enter" and state.login_button_focused then
+        state.login_button_focused = false; return dispatch("open-login")
+      end
+      state.login_button_focused = false
+      return false
+    end
     if key.key == "tab" then state.focus = ((state.focus or 1) % math.max(1, #controls)) + 1; return true end
     local id = controls[state.focus or 1] or ""
     if key.key == "enter" then

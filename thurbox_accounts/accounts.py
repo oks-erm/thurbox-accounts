@@ -152,8 +152,8 @@ class Claude:
 
     def login(self, profile):
         # Native interactive browser/SSO flow, no captured tokens or credential reads.
-        return subprocess.call([self.executable, 'auth', 'login', '--sso'], env=account_env(profile),
-                               cwd=profile['directory'])
+        from .login import login
+        return login(self.executable, profile, account_env(profile))
 
 
 class Accounts:

@@ -27,18 +27,21 @@ Each dialog offers **Open Settings** if its permission is missing.
 ## Sign in, start, switch
 
 1. **F7 → Add account → Log in.** Use a distinct name, such as Work A. Repeat for Work B.
-2. Before using up account allowance, click **Prepare switching…** in Accounts,
-   select the accounts and review the optional compatibility check. It consumes
-   allowance for synthetic requests; it does not send your work.
-3. **Ctrl+N → choose project and name → Claude — Work A → Create.**
-4. In the conversation, click **Switch account → Work B**. Approve the listed
-   accounts/organizations once so they can use that conversation's context.
-   Subsequent switches between approved accounts need no new sharing setup.
+   Click **Open sign-in page** above the login terminal if its long link wraps.
+   The button opens the complete URL. Finish any native prompts, then return with F7.
+2. **Ctrl+N → choose project and name → Claude — Work A → Create.**
+   This chooses the main account. Switching is On from creation.
+3. Click **Switch account → Switch to Work B**. Choosing the account approves
+   its access to this conversation. Later switches work the same way.
 
-Finish tools, background jobs and permission prompts before switching. An idle
-switch can wait about a minute for Claude to confirm it is idle. A usage-limit
-switch uses the quota signal. If a required compatibility check fails because an
-account is exhausted, wait for its allowance to reset; the source stays unchanged.
+Switching sends no synthetic test prompts and requires no allowance from the
+source account. Existing history resumes under the chosen account. If the history cannot be found, switching stops and keeps the original; it never
+silently substitutes a new empty conversation.
+Active tools, background jobs and permission prompts still block a history switch.
+An idle history switch can wait for Claude to report a safe stopping point.
+The paid compatibility diagnostic in Accounts is optional.
+
+The Accounts pane's New session button opens the same main-account picker.
 
 Use named Claude choices for this flow. Default/unmanaged and old sessions need
 [advanced attachment](../README.md#advanced-attach-older-unguarded-conversations).

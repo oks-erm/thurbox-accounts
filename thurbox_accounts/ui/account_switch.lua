@@ -14,9 +14,9 @@ local function result() return (thurbox.runs or {})[state.request_key or "none"]
 local function busy() local r=result(); return state.request_key ~= nil and (not r or r.state ~= "done") end
 local function completed()
   local r=result()
-  return r and r.state=="done" and r.ok and (state.operation=="confirm" or state.operation=="select" and (r.stdout or ""):match("^switch%-complete"))
+  return r and r.state=="done" and r.ok and (state.operation=="confirm" or state.operation=="select") and (r.stdout or ""):match("^switch%-complete\t[^\t\r\n]+\t[^\t\r\n]+")
 end
-local function opened() return state.open and not completed() end
+local function opened() return state.open and (not completed() or state.switch_notice) end
 local function model(request)
   local m={accounts={}}
   local selected = store.selected
@@ -36,7 +36,8 @@ local function model(request)
     local f=fields(row)
     if f[1]=="indicator" and f[2]==selected then m.label="Account: "..f[4].." | "..f[5].." | F7 Accounts"
     elseif f[1]=="account" then m.accounts[#m.accounts+1]={name=f[2],label=f[3],email=f[4],saved=f[5]=="saved"}
-    elseif f[1]=="inline" and f[2]==selected then m.current=f[3]; m.kind=f[4]; m.phase=f[5]; m.mode=f[6]
+    elseif f[1]=="account-org" then for _,account in ipairs(m.accounts) do if account.name==f[2] then account.org=f[3] end end
+    elseif f[1]=="inline" and f[2]==selected then m.current=f[3]; m.kind=f[4]; m.phase=f[5]; m.mode=m.kind=="single" and "on" or f[6]
     elseif f[1]=="conversation" and f[2]==selected then m.native=f[9] end
   end
   return m
@@ -63,7 +64,27 @@ local function ask(operation,args,long)
   run(state.request_key,table.concat(parts," "),{machine="local",timeout=long and 930 or 210,refresh=true})
 end
 local function reset()
-  state.request_key=nil; state.operation=nil; state.review_check=nil; state.focus=1
+  state.request_key=nil; state.operation=nil; state.review_check=nil; state.switch_notice=nil; state.focus=1
+end
+local function follow_switch()
+  if not completed() or state.followed_switch==state.request_key then return end
+  local values=fields((result().stdout or ""):match("[^\r\n]+") or "")
+  local owner=values[3]
+  if not owner then return end
+  state.followed_switch=state.request_key
+  state.switch_notice=values[4] and values[4]~="" and values[4] or nil
+  state.open=state.switch_notice~=nil
+  -- A replacement terminal has the same conversation history but a new
+  -- Thurbox session id. Future switches must start from this new owner.
+  local source_present=false
+  for _,session in ipairs(thurbox.sessions or {}) do if session.id==state.session then source_present=true; break end end
+  -- Retirement can make the interface choose a temporary fallback before this
+  -- receipt arrives. Follow the destination rather than staying on that row.
+  if store.selected==state.session or not source_present then
+    store.selected=owner
+    state.session=owner
+    command("focus",{text="agent"})
+  end
 end
 local function targets(m)
   local rows={}; for _,p in ipairs(m.accounts) do if p.saved and p.name~=m.current then rows[#rows+1]=p end end; return rows
@@ -83,12 +104,22 @@ dispatch=function(id)
   if id=="back" then reset(); return true
   elseif id=="accounts" then state.open=false; command("action",{text="accounts.open"}); return true
   elseif id=="attach" then state.open=false; command("action",{text="accounts.conversations"}); command("focus",{text="accounts"}); return true
+  elseif id=="verify-current" then ask("verify-current",{"verify-account","--session",state.session})
   elseif id=="on" and m.mode=="off" then ask("on",{"mode-on","--session",state.session})
   elseif id=="recover" and m.phase and m.phase~="active" then ask("recover",{"recover-shared","--session",state.session})
   elseif id=="more" then state.page=((state.page or 0)+1)%math.max(1,math.ceil(#targets(m)/4)); state.focus=1
   elseif id:sub(1,7)=="target:" and m.phase=="active" and m.mode~="off" then
     for _,target in ipairs(targets(m)) do
-      if target.name==id:sub(8) then state.target=target.name; ask("select",{"simple-select","--session",state.session,"--to",target.name}); return true end
+      if target.name==id:sub(8) then
+        state.target=target.name
+        local args={"simple-select","--session",state.session,"--to",target.name}
+        if state.choice_ready and state.choice_session==state.session and state.choice_accounts and state.choice_accounts[target.name] then
+          args[#args+1]="--consent"; args[#args+1]="--expected-source"; args[#args+1]=state.choice_source
+          args[#args+1]="--expected-email"; args[#args+1]=state.choice_accounts[target.name].email
+          args[#args+1]="--expected-org"; args[#args+1]=state.choice_accounts[target.name].org or ""
+        end
+        ask("select",args); return true
+      end
     end
   elseif id=="check" and p and not p.proof then state.review_check=true; state.focus=1
   elseif id=="verify" and p and state.review_check and ready and displayed_plan==p.id then
@@ -96,7 +127,7 @@ dispatch=function(id)
     state.review_check=nil; ask("verify",args,true)
   elseif id=="review" and state.target then
     state.review_check=nil; ask("select",{"simple-select","--session",state.session,"--to",state.target})
-  elseif id=="confirm" and p and p.proof and ready and displayed_plan==p.id then ask("confirm",{"simple-confirm",p.id,"--consent"}) end
+  elseif id=="confirm" and p and ready and displayed_plan==p.id then ask("confirm",{"simple-confirm",p.id,"--consent"}) end
   return true
 end
 return {
@@ -123,7 +154,8 @@ return {
     return true
   end,
   render=function(ctx)
-    controls={}; ready=false; displayed_plan=nil
+    follow_switch()
+    controls={}; ready=false; displayed_plan=nil; state.choice_ready=false
     if not opened() then return {type="text",text=""} end
     local m=model(true)
     local body={}; local cols=math.max(24,math.min(78,(ctx.width or 80)-2)); local width=cols-4; local rows=2
@@ -147,7 +179,11 @@ return {
         style={fg=theme.accent,bg=#controls==(state.focus or 1) and theme.selection_bg or nil}}; rows=rows+1
     end
     local p=plan(); local answer=result()
-    if busy() then
+    if state.switch_notice then
+      say("Account switched. Your conversation history is preserved.")
+      say(state.switch_notice)
+      button("Close","close")
+    elseif busy() then
       say(state.operation=="verify" and "Checking account compatibility… This can take several minutes." or "Waiting for Claude to pause safely… Idle confirmation can take about a minute.")
       say("The operation is in progress. Its result will appear here.")
     elseif not run then
@@ -170,13 +206,13 @@ return {
         say("This sends synthetic test requests using these accounts' allowance (up to $0.25 per top-level request). It sends no existing conversation. An exhausted account can prevent this check.")
       else
         say("These accounts and organizations can access this conversation's context. Its history stays local; logins remain separate. Later switches between these approved accounts reuse this approval.")
-        if not p.proof then say("A one-time compatibility check is required first. Prepare accounts before they reach their usage limit.") end
+        say("Switching sends no synthetic prompts and needs no allowance from the current account.")
       end
       -- Only a fully visible frozen account list and notice may be confirmed.
       ready=(ctx.height or 0)>=rows+3; displayed_plan=p.id
       if ready then
         if state.review_check then button("Run compatibility check","verify")
-        elseif p.proof then button("Allow and switch account","confirm") else button("Review compatibility check…","check") end
+        else button("Allow and switch account","confirm") end
         button("Choose a different account","back"); button("Cancel","close")
       else
         body={}; rows=2; controls={}
@@ -189,9 +225,11 @@ return {
     elseif not m.loaded then
       say(m.label); button("Close","close")
     elseif not m.current then
-      say("This conversation was started without a named account and has no switching guard.")
+      say(m.label)
+      if state.operation=="verify-current" and answer and answer.ok then say(answer.stdout or "Account verified") end
+      say("This older conversation has no switching guard. You can verify its current login without enabling switching.")
       say("For easy switching, use Ctrl+N and choose a named Claude account. An existing conversation can only be attached after its source is safely stopped and verified.")
-      button("Existing conversation setup","attach"); button("Manage logins","accounts"); button("Close","close")
+      button("Verify current account","verify-current"); button("Existing conversation setup","attach"); button("Manage logins","accounts"); button("Close","close")
     elseif m.phase~="active" then
       say("The previous switch needs recovery. History is preserved; another account will not be started until ownership is confirmed.")
       button("Recover conversation","recover"); button("Close","close")
@@ -200,8 +238,16 @@ return {
       button("Turn switching On","on"); button("Close","close")
     else
       say(m.label); say("Choose the account to continue this conversation with:")
+      say("Choosing an account allows it and its organization to access this conversation's history. No paid test prompts are sent.")
+      say("Switching continues the saved history. If it cannot be located, the switch stops without starting an empty conversation.")
+      state.choice_source=m.current; state.choice_accounts={}
       local list=targets(m); local first=(state.page or 0)*4+1
-      for i=first,math.min(#list,first+3) do button("Switch to "..list[i].label,"target:"..list[i].name) end
+      for i=first,math.min(#list,first+3) do
+        state.choice_accounts[list[i].name]={email=list[i].email,org=list[i].org}
+        say(list[i].email.." — "..(list[i].org and list[i].org~="" and list[i].org or "Organization not reported"))
+        button("Switch to "..list[i].label,"target:"..list[i].name)
+      end
+      state.choice_ready=(ctx.height or 0)>=rows+3; state.choice_session=state.session
       if #list==0 then say("Add and sign in to another account first."); button("Manage accounts","accounts") end
       if #list>4 then button("More accounts","more") end
       button("Close","close")

@@ -38,12 +38,17 @@ class SharedTests(unittest.TestCase):
     def proof(self):
         self.store.write('shared-proof.json',self.shared.proof_contract(['a','b']))
 
-    def test_enrollment_requires_consent_and_real_proof_before_moving_history(self):
+    def test_enrollment_requires_consent_but_no_paid_probe(self):
         with self.assertRaisesRegex(ValueError,'consent'):
             self.shared.enroll('source',['a','b'],consent=False)
-        with self.assertRaisesRegex(ValueError,'verify-shared'):
-            self.shared.enroll('source',['a','b'],consent=True)
-        self.assertFalse(self.path.is_symlink())
+        with patch('thurbox_accounts.shared_probe.verify', side_effect=AssertionError('no paid checks')):
+            record = self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        self.assertEqual(record['history_consent'],self.shared.proof_contract(['a','b']))
+        self.assertFalse(self.store.read('shared-proof.json'))
+        self.assertEqual(self.shared.require_consent(record),record['history_consent'])
+        self.accounts.claude.fingerprint=lambda:'changed-build'
+        with self.assertRaisesRegex(ValueError,'changed'):
+            self.shared.require_consent(record)
 
     def test_enrollment_shares_only_selected_history_and_keeps_same_uuid(self):
         self.proof()
@@ -70,10 +75,10 @@ class SharedTests(unittest.TestCase):
         self.assertEqual(alias.read_text(),'native replacement')
 
     def test_profile_identity_change_invalidates_proof(self):
-        self.proof()
+        record=self.shared.enroll('source',['a','b'],consent=True,launch=False)
         with patch.object(self.accounts.claude,'fingerprint',return_value='upgrade'):
-            with self.assertRaisesRegex(ValueError,'verify-shared'):
-                self.shared.enroll('source',['a','b'],consent=True)
+            with self.assertRaisesRegex(ValueError,'changed'):
+                self.shared.require_consent(record)
 
     def test_pending_reservation_blocks_old_managed_owner(self):
         from thurbox_accounts.guard import authorize
@@ -83,6 +88,44 @@ class SharedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'reservation'):
             authorize(record,'new','wrong')
         authorize(record,'new','nonce')
+
+    def test_retirement_soft_deletes_only_stopped_predecessor_and_preserves_history(self):
+        record=self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record.update(phase='active',allowed_session='destination',retire_pending=['source'])
+        record['primary_cwd']=str(self.root)+'/'
+        self.store.write('runtime-'+self.uuid+'.json',dict(owner='destination',phase='running'))
+        content=Path(record['transcript']).read_bytes()
+        original=self.tb.call
+        def call(*args):
+            if args[:2]==('session','delete'):
+                self.tb.calls.append(args); return {'soft':True}
+            return original(*args)
+        with patch.object(self.tb,'call',side_effect=call):
+            self.assertFalse(self.shared.retire_previous(record))
+        self.assertIn(('session','delete','source','--soft'),self.tb.calls)
+        self.assertEqual(record['retire_pending'],[])
+        self.assertEqual(Path(record['transcript']).read_bytes(),content)
+
+    def test_retirement_keeps_running_source_and_never_deletes_current_owner(self):
+        record=self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record.update(phase='active',allowed_session='destination',retire_pending=['source','destination'])
+        self.store.write('runtime-'+self.uuid+'.json',dict(owner='destination',phase='running'))
+        self.tb.sessions['source']['stopped']=False
+        self.assertTrue(self.shared.retire_previous(record))
+        self.assertFalse(any(c[:2]==('session','delete') for c in self.tb.calls))
+
+    def test_retirement_failure_is_a_notice_after_a_successful_launch(self):
+        record=self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record.update(phase='active',allowed_session='destination',retire_pending=['source'])
+        self.store.write('runtime-'+self.uuid+'.json',dict(owner='destination',phase='running'))
+        original=self.tb.call
+        def call(*args):
+            if args[:2]==('session','delete'): raise RuntimeError('database unavailable')
+            return original(*args)
+        with patch.object(self.tb,'call',side_effect=call):
+            self.assertTrue(self.shared.retire_previous(record))
+        self.assertEqual(record['phase'],'active')
+        self.assertEqual(record['retire_pending'],['source'])
 
     def test_canonical_parent_replacement_is_refused(self):
         self.proof()
@@ -131,6 +174,10 @@ class SharedTests(unittest.TestCase):
             if args[:2] == ('session','create'):
                 owner = args[args.index('--id')+1]
                 self.store.write('runtime-' + self.uuid + '.json',dict(owner=owner,phase='running'))
+            if args[:2] == ('session','get'):
+                return self.tb.sessions.get(args[2], {})
+            if args[:2] == ('session','delete'):
+                return {'soft':True}
             if args[:2] == ('session','focus') and focus_fails:
                 raise RuntimeError('focus unavailable')
             return {}
@@ -142,6 +189,16 @@ class SharedTests(unittest.TestCase):
         result = self.launch_fixture(focus_fails=True)
         self.assertIn('notice',result)
         self.assertEqual(self.shared.load(self.uuid)['phase'],'active')
+
+    def test_successful_launch_retires_only_the_stopped_old_row_after_creation(self):
+        result=self.launch_fixture()
+        create=next(i for i,c in enumerate(self.tb.calls) if c[:2]==('session','create'))
+        deletes=[(i,c) for i,c in enumerate(self.tb.calls) if c[:2]==('session','delete')]
+        self.assertEqual(len(deletes),1)
+        self.assertGreater(deletes[0][0],create)
+        self.assertEqual(deletes[0][1],('session','delete','source','--soft'))
+        self.assertNotEqual(result['session'],'source')
+        self.assertEqual(self.shared.load(self.uuid)['retire_pending'],[])
 
     def test_recovery_creates_missing_reserved_session_without_new_uuid(self):
         result = self.launch_fixture(recover=True)
