@@ -24,6 +24,9 @@ local function model(request)
   local session
   for _, row in ipairs(thurbox.sessions or {}) do if row.id == selected then session = row; break end end
   if not session then m.label="Account: no conversation selected"; return m end
+  m.native=session.agent_session_id
+  m.can_continue=not session.host and (session.backend_type==nil or session.backend_type=="tmux" or session.backend_type=="local:tmux")
+    and (session.agent=="claude" or session.agent=="claude-accounts" or (session.agent or ""):sub(1,#"Claude — ")=="Claude — ")
   if session.agent == "codex" then m.label="Account: default | Codex"; return m end
   if not run then m.label="Account: allow account-switch in Settings > Interface"; return m end
   local key = "account-status-" .. selected .. "-" .. tostring(state.number or 0) .. (busy() and "-pending" or "-done")
@@ -38,7 +41,9 @@ local function model(request)
     elseif f[1]=="account" then m.accounts[#m.accounts+1]={name=f[2],label=f[3],email=f[4],saved=f[5]=="saved"}
     elseif f[1]=="account-org" then for _,account in ipairs(m.accounts) do if account.name==f[2] then account.org=f[3] end end
     elseif f[1]=="inline" and f[2]==selected then m.current=f[3]; m.kind=f[4]; m.phase=f[5]; m.mode=m.kind=="single" and "on" or f[6]
-    elseif f[1]=="conversation" and f[2]==selected then m.native=f[9] end
+    elseif f[1]=="conversation" and f[2]==selected then
+      m.native=f[9]; if not m.current and f[4]~="" then m.current=f[4] end
+    end
   end
   return m
 end
@@ -108,13 +113,14 @@ dispatch=function(id)
   elseif id=="on" and m.mode=="off" then ask("on",{"mode-on","--session",state.session})
   elseif id=="recover" and m.phase and m.phase~="active" then ask("recover",{"recover-shared","--session",state.session})
   elseif id=="more" then state.page=((state.page or 0)+1)%math.max(1,math.ceil(#targets(m)/4)); state.focus=1
-  elseif id:sub(1,7)=="target:" and m.phase=="active" and m.mode~="off" then
+  elseif id:sub(1,7)=="target:" and (m.can_continue or m.current) then
     for _,target in ipairs(targets(m)) do
       if target.name==id:sub(8) then
         state.target=target.name
-        local args={"simple-select","--session",state.session,"--to",target.name}
+        if not state.choice_ready then return true end
+        local args={"continue-context","--session",state.session,"--to",target.name}
         if state.choice_ready and state.choice_session==state.session and state.choice_accounts and state.choice_accounts[target.name] then
-          args[#args+1]="--consent"; args[#args+1]="--expected-source"; args[#args+1]=state.choice_source
+          args[#args+1]="--consent"; args[#args+1]="--expected-native"; args[#args+1]=state.choice_native
           args[#args+1]="--expected-email"; args[#args+1]=state.choice_accounts[target.name].email
           args[#args+1]="--expected-org"; args[#args+1]=state.choice_accounts[target.name].org or ""
         end
@@ -140,7 +146,7 @@ return {
     {action="account-switch.close",desc="Close the account chooser"},
   },
   ui_state=function() local p=plan(); return {label=opened() and summary() or "",selected=store.selected,open=opened() or false,
-    busy=busy(),operation=state.operation,plan=p and p.id,ready=ready,source=state.session,target=state.target} end,
+    busy=busy(),operation=state.operation,plan=p and p.id,ready=ready,choice_ready=state.choice_ready,source=state.session,target=state.target} end,
   on_action=function(action) if action:sub(1,15)=="account-switch." then return dispatch(action) end; return false end,
   on_click=function(hit) if hit.id then return dispatch(hit.id) end; return opened() or false end,
   on_outside=function() if opened() then if not busy() then state.open=false; reset() end; return true end; return false end,
@@ -180,11 +186,11 @@ return {
     end
     local p=plan(); local answer=result()
     if state.switch_notice then
-      say("Account switched. Your conversation history is preserved.")
+      say("New account conversation opened.")
       say(state.switch_notice)
       button("Close","close")
     elseif busy() then
-      say(state.operation=="verify" and "Checking account compatibility… This can take several minutes." or "Waiting for Claude to pause safely… Idle confirmation can take about a minute.")
+      say(state.operation=="verify" and "Checking account compatibility… This can take several minutes." or "Preparing saved context and opening the chosen account…")
       say("The operation is in progress. Its result will appear here.")
     elseif not run then
       say("One-time setup: allow Run for account-switch in Settings → Interface.")
@@ -206,7 +212,7 @@ return {
         say("This sends synthetic test requests using these accounts' allowance (up to $0.25 per top-level request). It sends no existing conversation. An exhausted account can prevent this check.")
       else
         say("These accounts and organizations can access this conversation's context. Its history stays local; logins remain separate. Later switches between these approved accounts reuse this approval.")
-        say("Switching sends no synthetic prompts and needs no allowance from the current account.")
+        say("Switching cancels current work and resumes saved history. No test prompts or source allowance are needed.")
       end
       -- Only a fully visible frozen account list and notice may be confirmed.
       ready=(ctx.height or 0)>=rows+3; displayed_plan=p.id
@@ -224,30 +230,25 @@ return {
       button("Continue","review"); button("Cancel","close")
     elseif not m.loaded then
       say(m.label); button("Close","close")
-    elseif not m.current then
+    elseif not m.can_continue and not m.current then
       say(m.label)
       if state.operation=="verify-current" and answer and answer.ok then say(answer.stdout or "Account verified") end
       say("This older conversation has no switching guard. You can verify its current login without enabling switching.")
       say("For easy switching, use Ctrl+N and choose a named Claude account. An existing conversation can only be attached after its source is safely stopped and verified.")
       button("Verify current account","verify-current"); button("Existing conversation setup","attach"); button("Manage logins","accounts"); button("Close","close")
-    elseif m.phase~="active" then
-      say("The previous switch needs recovery. History is preserved; another account will not be started until ownership is confirmed.")
-      button("Recover conversation","recover"); button("Close","close")
-    elseif m.mode=="off" then
-      say("Switching is Off for this conversation. Turn it on to use its previously approved accounts.")
-      button("Turn switching On","on"); button("Close","close")
     else
       say(m.label); say("Choose the account to continue this conversation with:")
       say("Choosing an account allows it and its organization to access this conversation's history. No paid test prompts are sent.")
-      say("Switching continues the saved history. If it cannot be located, the switch stops without starting an empty conversation.")
-      state.choice_source=m.current; state.choice_accounts={}
+      say("A new conversation reads the saved context and current project files. The previous session is preserved; its allowance is not needed.")
+      state.choice_native=m.native; state.choice_accounts={}
       local list=targets(m); local first=(state.page or 0)*4+1
       for i=first,math.min(#list,first+3) do
         state.choice_accounts[list[i].name]={email=list[i].email,org=list[i].org}
         say(list[i].email.." — "..(list[i].org and list[i].org~="" and list[i].org or "Organization not reported"))
-        button("Switch to "..list[i].label,"target:"..list[i].name)
+        button("Continue on "..list[i].label,"target:"..list[i].name)
       end
-      state.choice_ready=(ctx.height or 0)>=rows+3; state.choice_session=state.session
+      state.choice_ready=(ctx.height or 0)>=rows+3 and m.native~=nil; state.choice_session=state.session
+      if not state.choice_ready then say("Enlarge the window to review the sharing notice before choosing.") end
       if #list==0 then say("Add and sign in to another account first."); button("Manage accounts","accounts") end
       if #list>4 then button("More accounts","more") end
       button("Close","close")

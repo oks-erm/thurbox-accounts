@@ -41,6 +41,9 @@ def parser():
         command.add_argument('--session')
         if action == 'switch':
             command.add_argument('--expected-profile')
+    repair = commands.add_parser('repair-after-reboot',help='Back up and repair a failed/stopped session after a confirmed OS/WSL reboot')
+    repair.add_argument('--session',required=True)
+    repair.add_argument('--confirm-reboot',action='store_true',help='Confirm the OS/WSL rebooted since this session last ran')
     commands.add_parser('sync-accounts')
     verification_account = commands.add_parser('verify-account', help='Verify the current login of an existing conversation without sharing history')
     verification_account.add_argument('--session', required=True)
@@ -61,6 +64,12 @@ def parser():
     simple_select.add_argument('--expected-org')
     simple_confirm=commands.add_parser('simple-confirm')
     simple_confirm.add_argument('token'); simple_confirm.add_argument('--consent',action='store_true')
+    context=commands.add_parser('continue-context',help='Continue saved conversation context in a new account-scoped session')
+    context.add_argument('--session',required=True); context.add_argument('--to',required=True)
+    context.add_argument('--consent',action='store_true')
+    context.add_argument('--expected-native'); context.add_argument('--expected-email'); context.add_argument('--expected-org')
+    context_preview=commands.add_parser('context-preview',help='Inspect source and destination context identities without copying history or starting a model')
+    context_preview.add_argument('--session',required=True); context_preview.add_argument('--to',required=True)
     pane_state = commands.add_parser('pane-state')
     pane_state.add_argument('--session')
     mode_preview = commands.add_parser('mode-preview',help='Review switching mode for an existing stopped local conversation')
@@ -144,6 +153,15 @@ def run(args):
         from .agent_install import register_profiles
         print(dumps(register_profiles(service,Path(__file__).resolve().parents[1]/'bin/thurbox-accounts-agent')))
         return 0
+    if verb == 'context-preview':
+        from .continuation import Continuations
+        print(dumps(Continuations(service).preview(args.session,args.to)))
+        return 0
+    if verb == 'continue-context':
+        from .continuation import Continuations
+        print(dumps(Continuations(service).select(args.session,args.to,consent=args.consent,
+            expected_native=args.expected_native,expected_email=args.expected_email,expected_org=args.expected_org)))
+        return 0
     if verb.startswith('simple-'):
         from .simple import Simple
         simple=Simple(service)
@@ -166,6 +184,10 @@ def run(args):
         action = verb.removeprefix('desktop-')
         result = desktop.state() if action == 'state' else getattr(desktop,action)(args.session,*([args.value] if hasattr(args,'value') else []))
         print(dumps(result))
+        return 0
+    if verb == 'repair-after-reboot':
+        from .shared import Shared
+        print(dumps(Shared(service).repair_after_reboot(args.session,confirm=args.confirm_reboot)))
         return 0
     if verb in {'verify-shared','enable-shared','switch','shared-status','recover-shared'}:
         from .shared import Shared

@@ -8,7 +8,7 @@ from .desktop import Desktop
 
 OPERATIONS = {'pane-add','status','start','desktop-stop','desktop-start',
               'verify-shared','enable-shared','switch','recover-shared',
-              'mode-preview','mode-enable','mode-on','mode-off','simple-preview','simple-select','simple-confirm','sync-accounts','verify-account','assign-account'}
+              'mode-preview','mode-enable','mode-on','mode-off','simple-preview','simple-select','simple-confirm','continue-context','sync-accounts','verify-account','assign-account'}
 
 
 def verified_profile(accounts, selected):
@@ -124,6 +124,9 @@ def indicator(accounts, selected, data, records):
 
 
 def receipt(action, value):
+    if action == 'continue-context':
+        return ('switch-complete\t'+quote(value['profile'],safe='')+'\t'+quote(value['session'],safe='')+
+                '\t'+quote(value.get('notice','Opened with saved context'),safe=''))
     if action == 'assign-account':
         return ('Assigned account: ' + value['label'] + '. Native identity was unavailable; switching setup still requires history-sharing approval.'
                 if value.get('assigned') else 'Verified current account: ' + value['label'] + '.')

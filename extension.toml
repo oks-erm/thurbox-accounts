@@ -1,7 +1,7 @@
 name = "thurbox-accounts"
 description = "Isolated Claude Enterprise logins and one-click shared conversation switching"
 config_version = 1
-version = "0.5.0"
+version = "0.6.0"
 
 [[files]]
 path = "bin/thurbox-accounts"
@@ -60,6 +60,9 @@ path = "thurbox_accounts/shared.py"
 path = "thurbox_accounts/guard.py"
 
 [[files]]
+path = "thurbox_accounts/processes.py"
+
+[[files]]
 path = "thurbox_accounts/shared_probe.py"
 
 [[files]]
@@ -85,6 +88,9 @@ path = "thurbox_accounts/ui/account_status.lua"
 
 [[files]]
 path = "thurbox_accounts/simple.py"
+
+[[files]]
+path = "thurbox_accounts/continuation.py"
 
 [[files]]
 path = "thurbox_accounts/creation_ui.py"
