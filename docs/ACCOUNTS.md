@@ -1,5 +1,14 @@
 # Shared one-click switching
 
+The account chooser now defaults to **saved-context continuation**:
+`continue-context --session SOURCE --to PROFILE --consent`. It snapshots selected
+history into the common private context store and starts a new named-account
+conversation in the same project. Only the destination authenticates or sends a
+model request. Source quota, unverified account labels, failed launches and stale
+worker records do not gate read-only context transfer. The source is preserved.
+Linked snapshots retain earlier context on subsequent continuations. The original
+native shared-history commands below remain available for advanced use.
+
 For sequential account use with one local conversation, follow the
 [short colleague guide](QUICKSTART.md).
 The handoff commands below are the older explicit snapshot/fork workflow.
@@ -51,9 +60,27 @@ account-status/account-switch need Run, granted by the user in Interface setting
 
 New named sessions are guarded from their first turn. First switching approval is
 specific to the source/target accounts and organizations shown in the chooser. No terminal stop command
-or separate mode setup is required. Idle switching waits for an independent native
-idle notification; the guard refuses tools/background jobs/scheduled work/unknown
-completion. Existing unguarded sessions retain the advanced mode workflow below.
+or separate mode setup is required for the chooser's independent continuation.
+The source remains untouched. For the advanced native `switch` CLI, choosing a destination explicitly cancels
+current native work: the helper checks the native UUID/settings/process identity,
+captures and stops its process tree, waits for the supervisor and writer lock,
+then resumes saved history on the chosen account. The captured tree is paused
+and terminated without resuming, so exit handlers cannot spawn more workers. Cancellation keeps
+the old task ledger and process evidence; it does not fabricate task completion.
+Unverifiable shutdown still prevents a second writer. Existing unguarded sessions
+retain the advanced mode workflow below.
+On Linux/WSL, new guardians also adopt detached workers so cancellation includes
+them. Older guardians and macOS cannot prove ownership of already detached tasks;
+their unconfirmed background/subagent/scheduled entries still block switching.
+Older supervisors on macOS or installed via pip need one restart to record the
+native process's launch identity; new supervisors pin it before Claude replaces
+its arguments with a title. A restart does not erase unconfirmed old task evidence;
+those tasks must first report completion in native Claude.
+After a confirmed OS/WSL reboot, older failed sessions can instead use
+`repair-after-reboot --session SESSION_ID --confirm-reboot`, followed by
+`thurbox-cli session restart SESSION_ID`. This archives the old tracker and
+requires an absent native PID, free writer lease and dates predating boot. New
+guardians record a kernel boot UUID for automatic recovery after future reboots.
 
 The older `start` CLI creates ordinary account-bound sessions, not the new Ctrl+N
 flow. Snapshot/fork handoff commands below remain available for advanced use.

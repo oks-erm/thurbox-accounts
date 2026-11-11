@@ -190,3 +190,51 @@ signal, because a Stop hook may continue generation; synthetic tests supply that
 signal through the real guard bridge. Native compatibility tests still require
 explicit user approval and account allowance. No deployment or capability grant
 was performed.
+
+## Explicit task cancellation on account switch (2026-11-06)
+
+- 146 Python tests pass, including real synthetic process/supervisor cancellation,
+  stubborn workers, double-forked workers adopted by a Linux subreaper, native title
+  replacement, shebang/exec wrappers, PID reuse refusals and freeze/exit races.
+- A synthetic native hook holds the events lock while switching begins; the
+  controller waits before freezing workers, avoiding a lock/pause deadlock.
+- The one-click switch, existing setup, login-link and new-session Lua VM smoke
+  scripts pass; compileall and `git diff --check` pass.
+- The tmux smoke cannot create a session in this sandbox: its Unix socket returns
+  `Operation not permitted`. No live Enterprise switch or real task cancellation
+  was performed. Tests signal only synthetic subprocesses.
+- Installed extension/UI directories are outside the writable workspace. This
+  checkout must be installed on the host to use the change. Existing guardians
+  without worker ownership still preserve unconfirmed background-task evidence.
+
+## Reboot recovery (2026-11-09)
+
+- Full suite: 156 tests pass. Eight boot-recovery cases cover different/current/
+  invalid boot UUIDs, absent metadata, explicit legacy confirmation, present PIDs,
+  writer leases, backups and idempotence. Twenty-four Shared cases include failed
+  session repair and actual supervisor startup from a prior-boot runtime.
+- The real synthetic startup receives new-session arguments but launches native
+  `--resume` with the original UUID after recovery; its saved history stays intact.
+- Legacy timestamps cannot authorize automatic recovery. User-confirmed reboot
+  repair additionally requires the stopped/failed owner, saved history, an absent
+  native PID and free lease. No actual installed user state was repaired here.
+- One-click Lua smoke, compileall and diff whitespace checks pass. Live tmux
+  integration remains blocked by this sandbox's Unix-socket restrictions.
+
+## Account-independent saved context (2026-11-11)
+
+- Continuation tests exercise target-only authentication while source auth raises,
+  failed/quota sources with stale task markers, unchanged source records/history,
+  ordinary unverified sources, partial final writes, lineage across accounts,
+  consent/identity checks, modified snapshot refusal and profile-name sanitation.
+- Retry tests cover lost create responses before and after creation, one reserved
+  destination ID, origin mapping repair and stale runtime/public-session mismatch.
+- A real synthetic Python child is launched through the native guard. It records
+  exactly one initial handoff prompt and the selected context directory, then
+  resumes the same native UUID without replaying that prompt. No model is invoked.
+- Real Lua VM checks cover one-click continuation, destination following, frozen
+  identity, small-screen consent blocking and an ordinary/Off source. Login,
+  existing-conversation and new-session VM regression checks pass.
+- Full suite, compile and manifest/installer tests pass. Actual native model reads,
+  real SSO and tmux --if-missing retry remain unverified here: sandbox restrictions
+  prevent live transport, and existing sessions were deliberately left untouched.

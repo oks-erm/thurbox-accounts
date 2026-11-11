@@ -31,14 +31,16 @@ Each dialog offers **Open Settings** if its permission is missing.
    The button opens the complete URL. Finish any native prompts, then return with F7.
 2. **Ctrl+N → choose project and name → Claude — Work A → Create.**
    This chooses the main account. Switching is On from creation.
-3. Click **Switch account → Switch to Work B**. Choosing the account approves
+3. Click **Switch account → Continue on Work B**. Choosing the account approves
    its access to this conversation. Later switches work the same way.
 
-Switching sends no synthetic test prompts and requires no allowance from the
-source account. Existing history resumes under the chosen account. If the history cannot be found, switching stops and keeps the original; it never
-silently substitutes a new empty conversation.
-Active tools, background jobs and permission prompts still block a history switch.
-An idle history switch can wait for Claude to report a safe stopping point.
+The new conversation reads a private copy of saved context and current project
+files using the chosen account. The source account sends no model request and
+needs no allowance. Its session is left untouched. Recent excerpts and the complete
+saved transcript are available in the common context store; earlier snapshots
+remain linked across later continuations. Missing history refuses before creating
+anything. The destination's context-reading turn uses its own allowance and normal
+permissions. Restart resumes it without repeating the initial handoff prompt.
 The paid compatibility diagnostic in Accounts is optional.
 
 The Accounts pane's New session button opens the same main-account picker.

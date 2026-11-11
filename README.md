@@ -53,26 +53,35 @@ installer never grants them. The dialogs link to Settings if permission is missi
    available for troubleshooting; it is not required for switching.
 3. **Ctrl+N**, choose your project/name, then **Claude — Work A** in **Agent / account**.
    The conversation shows **Account: Work A** from startup.
-4. Click **Switch account** and choose **Work B**. The chooser identifies the
+4. Click **Switch account** and choose **Continue on Work B**. The chooser identifies the
    accounts and explains that choosing one approves its access to this history.
    There is no extra trust screen or synthetic model call.
 
-Working tools, background jobs, scheduled wakeups and permission prompts block a
-history switch. Usage-limit switches use the guarded quota signal. An idle history
-switch may wait for Claude's independent idle notification. Switching must locate the saved native history. A missing transcript is not
-treated as an empty conversation; the original remains intact and no replacement
-session is opened.
+The chooser now uses **saved-context continuation**. It makes a private snapshot
+of the selected conversation and opens a new named-account session in the same
+project/worktree. A one-time initial prompt tells Claude to read that context,
+inspect current files/Git changes and continue unfinished work. The source account
+does not authenticate, answer, summarize or stop. Its quota and stale shutdown
+tracking do not block this independent conversation.
 
-No paid check or source-account allowance is required. Account identities, native
-build, local ownership and history aliases are still checked. Approval is stored
-for the exact conversation/account group; it is never presented as a passed native
-compatibility test. The optional **compatibility diagnostics** action still uses
-synthetic model requests when explicitly requested.
+The complete source transcript and readable recent excerpts live under the shared
+local `~/.local/share/thurbox-loop/accounts/contexts/` store. Later continuations
+retain access to earlier snapshots. Each account keeps its own native login and
+each continuation gets its own native UUID. This reconstructs context from saved
+history rather than moving an in-memory model state. Missing history refuses
+before creation; it never silently substitutes an empty session.
 
-After the destination owns the conversation, stopped predecessor session entries
-are soft-deleted automatically. Shared history and worktrees are preserved; the
-session list keeps the current owner. Cleanup failures leave the switch active
-and show a notice instead of rolling back a working conversation.
+No paid check or source-account allowance is required. Continuation pins the source
+UUID and selected target identity, verifies owned snapshot files and preserves
+normal launch permissions. It does not create a shared-history alias contract.
+The advanced native shared-history path retains its account/build and alias
+checks. Its optional compatibility diagnostic uses synthetic model requests only
+when explicitly requested.
+
+Context continuation preserves the original session and project files. It never
+copies login directories, stops the original, or starts a compatibility test.
+Native shared-history switching remains an advanced CLI path; only that path
+retires its stopped predecessor rows after the destination writer starts.
 
 A recognized stock/owned New session pane is adapted with a backup. Custom edits
 are preserved and installation explains how to restore the stock pane before
@@ -243,26 +252,53 @@ Use the new guarded session returned by the command; leave the original stopped.
 
 ## Switch when the account reaches its limit
 
+If a session fails after an OS/WSL reboot with **Previous native shutdown is
+unconfirmed**, install the latest checkout first. New guardians store a kernel
+boot ID and recover automatically when it changes. For older failed sessions,
+confirm that the OS/WSL rebooted since they last ran, then use:
+
+```sh
+thurbox-accounts repair-after-reboot --session SESSION_ID --confirm-reboot
+thurbox-cli session restart SESSION_ID
+```
+
+Repair requires a failed/exited or stopped local session, its free writer lease,
+an absent old native PID and file dates before the current boot. It backs up the
+complete old tracking record and preserves the conversation UUID/history. It
+cannot override a valid current-boot record or corrupted boot ID. Recovery forces
+native `--resume` when Thurbox would otherwise use new-session arguments.
+
 Click **Switch account** above the conversation and choose the destination.
 The chooser identifies the account and organization; choosing it approves access
-to this conversation. The source stops at a safe point, the same native UUID and
-history resume under the destination, and the UI follows that session. There is
-no per-switch fork, history copy, paid diagnostic or extra model request.
-Restored context is used when you next send a prompt.
+to this conversation. A new account-scoped conversation reads saved context and
+the UI follows that session. Its initial context-reading turn uses the destination
+account; there is no model request or required allowance on the source account.
+This works for ordinary, limited and failed local Claude sources with saved history.
 
 CLI equivalent:
+
+```sh
+thurbox-accounts continue-context --session SOURCE_SESSION_ID --to work-b --consent
+```
+
+The original remains available, and retries reuse a reserved destination rather
+than duplicating it. The bootstrap prompt is sent once; restart resumes the new
+conversation without replaying that prompt. Context is bounded to 20 MB per file,
+100 MB total and 64 linked snapshots. The target follows normal native permissions;
+it may ask for project trust or file/tool approval.
+
+Advanced native shared-history CLI (retains its separate shutdown policy):
 
 ```sh
 thurbox-accounts switch --session CURRENT_SHARED_SESSION_ID
 thurbox-accounts shared-status --session CURRENT_SHARED_SESSION_ID
 ```
 
-Switching refuses active tools/subagents, unconfirmed background shell jobs, permission prompts, unknown state or
-unconfirmed shutdown. If native task completion cannot be verified, switching and
-recovery stay blocked; finish the task in native Claude and inspect its status
-before retrying. A native `StopFailure` with `rate_limit` permits the guarded
-stop. If Claude reports a different limit/error, stop the session yourself at a
-safe point, then switch. Crashed-supervisor evidence is preserved rather than
+For current Linux/WSL guardians, explicit switching cancels work rather than
+waiting for task-completion hooks. Cancelled task and process evidence is retained.
+Unverified shutdown still blocks another writer. Older guardians and macOS retain
+the guarded idle/quota stop when background ownership cannot be established;
+finish those tasks in native Claude before retrying. Crashed-supervisor evidence is preserved rather than
 starting another writer. Never start direct Claude processes against shared
 history; the lock protects managed `claude-accounts` sessions only.
 
