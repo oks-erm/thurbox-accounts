@@ -1,6 +1,12 @@
 import json
+import multiprocessing
+import os
 from pathlib import Path
+import signal
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -160,6 +166,41 @@ class SharedTests(unittest.TestCase):
         spawn.assert_not_called()
         self.assertEqual(self.shared._runtime(self.uuid),state)
 
+    def test_explicit_failed_session_reboot_repair_preserves_uuid_and_history(self):
+        self.proof()
+        record=self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record.update(allowed_session='source',phase='active')
+        self.shared.save(record)
+        self.tb.sessions['source'].update(agent='claude-accounts',stopped=False,state='failed',
+                                         launch_failure=dict(reason='exited'))
+        state=dict(owner='source',phase='running',native_pid=99999999,tools=['old'],background_tools={'bg':'task'})
+        self.store.write('runtime-'+self.uuid+'.json',state)
+        before=Path(record['transcript']).read_bytes()
+        with self.assertRaisesRegex(ValueError,'confirm-reboot'):
+            self.shared.repair_after_reboot('source')
+        boot=dict(id='22222222-2222-4222-8222-222222222222',started_ns=time.time_ns()+1_000_000_000)
+        with patch('thurbox_accounts.guard.boot_identity',return_value=boot), \
+                patch('thurbox_accounts.guard.os.kill',side_effect=ProcessLookupError):
+            result=self.shared.repair_after_reboot('source',confirm=True)
+        self.assertTrue(result['repaired'])
+        self.assertEqual(result['conversation'],self.uuid)
+        self.assertEqual(json.loads(Path(result['backup']).read_text()),state)
+        self.assertEqual(Path(record['transcript']).read_bytes(),before)
+        self.assertFalse(any(call[:2] in {('session','create'),('session','restart'),('session','stop')} for call in self.tb.calls))
+
+    def test_reboot_repair_refuses_a_running_or_foreign_session(self):
+        self.proof()
+        record=self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record.update(allowed_session='source',phase='active')
+        self.shared.save(record)
+        self.tb.sessions['source'].update(agent='claude-accounts',stopped=False,state='working')
+        with self.assertRaisesRegex(ValueError,'Stop the affected'):
+            self.shared.repair_after_reboot('source',confirm=True)
+        self.assertFalse(self.store.read('runtime-'+self.uuid+'.json'))
+        record['allowed_session']='other'; self.shared.save(record)
+        with self.assertRaisesRegex(ValueError,'current managed'):
+            self.shared.repair_after_reboot('source',confirm=True)
+
     def launch_fixture(self, *, recover=False, focus_fails=False):
         self.proof()
         record = self.shared.enroll('source',['a','b'],consent=True,launch=False)
@@ -234,6 +275,139 @@ class SharedTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'progress'):
                 self.shared.switch(self.uuid)
         self.assertFalse(self.store.read('control-' + self.uuid + '.json'))
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux guardian worker ownership')
+    def test_switch_cancels_native_with_stale_task_markers_before_releasing_history(self):
+        from thurbox_accounts.guard import supervise, update, writer_available
+        self.proof()
+        record = self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record.update(phase='active',allowed_session='owner')
+        self.shared.save(record)
+        original = Path(record['transcript']).read_bytes()
+        # A killed/rebooted old guardian left its PID and task ledger behind.
+        self.store.write('runtime-' + self.uuid + '.json',dict(owner='owner',phase='running',
+            native_pid=99999999,tools=['pre-reboot-tool'],background_tools={'pre-reboot':'task'},
+            boot=dict(id='11111111-1111-4111-8111-111111111111')))
+        self.tb.sessions['owner'] = dict(self.tb.sessions['source'], id='owner', stopped=False)
+        script = self.root / 'synthetic_claude.py'
+        native_args = self.root / 'native-args.json'
+        detached_pid = self.root / 'detached-worker'
+        hook_start = self.root / 'start-hook'
+        hook_ready = self.root / 'hook-lock-held'
+        hook = ('import fcntl,os,pathlib,time\n'
+                f'while not pathlib.Path({str(hook_start)!r}).exists(): time.sleep(.01)\n'
+                f'fd=open({str(self.store.root / ("events-" + self.uuid + ".lock"))!r},"a")\n'
+                'fcntl.flock(fd,fcntl.LOCK_EX)\n'
+                f'pathlib.Path({str(hook_ready)!r}).write_text(str(os.getpid()))\n'
+                'time.sleep(.3)\n'
+                'fcntl.flock(fd,fcntl.LOCK_UN)\n'
+                'time.sleep(60)\n')
+        middle = ('import subprocess,sys; p=subprocess.Popen([sys.executable,"-c","import time;time.sleep(60)"],'
+                  f'start_new_session=True); open({str(detached_pid)!r},"w").write(str(p.pid))')
+        script.write_text('import json,subprocess,sys,time\n'
+                          f'open({str(native_args)!r},"w").write(json.dumps(sys.argv[1:]))\n'
+                          f'subprocess.run([sys.executable,"-c",{middle!r}],check=True)\n'
+                          f'subprocess.Popen([sys.executable,"-c",{hook!r}])\n'
+                          'time.sleep(60)\n')
+        supervisor = multiprocessing.get_context('fork').Process(target=supervise,
+            args=(self.shared, record, 'owner', self.a, sys.executable,
+                  [str(script),'--session-id',self.uuid], Path('/test-launcher')))
+        supervisor.start()
+        def cleanup():
+            if supervisor.is_alive():
+                supervisor.terminate()
+            supervisor.join(timeout=3)
+            if supervisor.is_alive():
+                supervisor.kill(); supervisor.join()
+        self.addCleanup(cleanup)
+        deadline = time.monotonic() + 3
+        while (self.shared._runtime(self.uuid).get('phase') != 'running'
+               or self.shared._runtime(self.uuid).get('native_pid') == 99999999) and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertEqual(self.shared._runtime(self.uuid).get('phase'), 'running')
+        archives=list(self.store.root.glob('runtime-before-boot-' + self.uuid + '-*.json'))
+        self.assertEqual(len(archives),1)
+        self.assertEqual(json.loads(archives[0].read_text())['tools'],['pre-reboot-tool'])
+        while not detached_pid.exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertTrue(detached_pid.exists())
+        recovered_args=json.loads(native_args.read_text())
+        self.assertEqual(recovered_args[recovered_args.index('--resume')+1],self.uuid)
+        self.assertNotIn('--session-id',recovered_args)
+        worker_pid = int(detached_pid.read_text())
+        def cleanup_worker():
+            try:
+                os.kill(worker_pid,signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        self.addCleanup(cleanup_worker)
+        from thurbox_accounts.processes import snapshot
+        self.assertEqual(snapshot()[worker_pid]['parent'],supervisor.pid)
+        update(self.store,self.uuid,turn='quota',tools=['missed-post-tool'],
+               background_tools={'old-tool':'old-task'},scheduled_work=[{'id':'old-wakeup'}],
+               subagents=['old-agent'],scheduled_work_unknown=True)
+        hook_start.touch()
+        deadline = time.monotonic() + 3
+        while not hook_ready.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertTrue(hook_ready.exists())
+        hook_pid = int(hook_ready.read_text())
+        self.accounts.claude.executable = sys.executable
+        original_call = self.tb.call
+        def call(*args):
+            if args[:2] == ('session','stop'):
+                self.tb.sessions[args[2]]['stopped'] = True
+            return original_call(*args)
+        errors = []
+        def pause():
+            try:
+                self.shared._pause(record,allow_idle=True)
+            except Exception as error:
+                errors.append(error)
+        with patch.object(self.tb,'call',side_effect=call):
+            controller = threading.Thread(target=pause,daemon=True)
+            controller.start()
+            controller.join(timeout=5)
+            blocked = controller.is_alive()
+            if blocked:
+                # Release a frozen hook's lock so a regressed implementation
+                # fails this test without leaving synthetic processes behind.
+                os.kill(hook_pid,signal.SIGKILL)
+                controller.join(timeout=3)
+            self.assertFalse(blocked, 'Shutdown froze a hook holding its required events lock')
+            if errors:
+                raise errors[0]
+        supervisor.join(timeout=2)
+        self.assertFalse(supervisor.is_alive())
+        self.assertTrue(writer_available(self.store,self.uuid))
+        state = self.shared._runtime(self.uuid)
+        self.assertEqual(state['stop_result'], 'cancelled')
+        self.assertTrue(state['shutdown_evidence']['confirmed'])
+        self.assertIn(worker_pid,{p['pid'] for p in state['shutdown_evidence']['processes']})
+        self.assertIn(hook_pid,{p['pid'] for p in state['shutdown_evidence']['processes']})
+        self.assertEqual(state['cancelled_work']['background_tools'], {'old-tool':'old-task'})
+        self.assertEqual(state['last_shutdown']['cancelled_work'],state['cancelled_work'])
+        self.assertEqual(state['last_shutdown']['processes'],state['shutdown_evidence']['processes'])
+        for key in ('tools','subagents','background_tools','scheduled_work','uncertain','error'):
+            self.assertFalse(state.get(key), key)
+        self.assertEqual(Path(record['transcript']).read_bytes(), original)
+        self.assertTrue(self.tb.sessions['owner']['stopped'])
+        self.assertFalse(any(call[:2] == ('session','create') for call in self.tb.calls))
+
+    def test_unconfirmed_cancellation_preserves_task_evidence_and_does_not_launch(self):
+        self.proof()
+        record = self.shared.enroll('source',['a','b'],consent=True,launch=False)
+        record.update(phase='active',allowed_session='owner')
+        self.shared.save(record)
+        self.accounts.claude.executable = sys.executable
+        state = dict(owner='owner',phase='running',native_pid=99999999,tools=['tool'])
+        self.store.write('runtime-' + self.uuid + '.json',state)
+        with patch.object(self.shared,'_launch') as launch:
+            with self.assertRaisesRegex(ValueError,'verify'):
+                self.shared.switch(self.uuid)
+        launch.assert_not_called()
+        self.assertEqual(self.shared._runtime(self.uuid),state)
+        self.assertFalse(any(call[:2] == ('session','stop') for call in self.tb.calls))
 
     def test_completed_aliases_recover_after_enrollment_controller_crash(self):
         self.proof()

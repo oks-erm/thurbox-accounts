@@ -5,10 +5,12 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
 import time
+import uuid
 
 from .accounts import Accounts, Claude, Profiles, account_env
 from .core import atomic_write, dumps, redact
@@ -61,6 +63,76 @@ def update(store, conversation, **fields):
         current.update(fields)
         store.write(name, current)
         return current
+
+
+def boot_identity():
+    """Read the local Linux kernel's boot identity, never infer it from PIDs."""
+    if not sys.platform.startswith('linux'):
+        return None
+    try:
+        boot = str(uuid.UUID(Path('/proc/sys/kernel/random/boot_id').read_text().strip()))
+        started = next(line.split()[1] for line in Path('/proc/stat').read_text().splitlines()
+                       if line.startswith('btime '))
+        return dict(id=boot,started_ns=int(started)*1_000_000_000)
+    except (OSError,ValueError,StopIteration,IndexError):
+        return None
+
+
+def reconcile_boot(store, conversation, owner, *, writer_held=False, confirm_legacy=False):
+    """Archive old runtime evidence only when a reboot proves its workers died.
+
+    Legacy records lack boot IDs and require explicit reboot confirmation, absent
+    native PID, and corroborating file dates. Wall-clock dates alone are not boot
+    proof. A free lease or absent PID alone is insufficient.
+    Called only during explicit launch/switch, never a read-only UI refresh.
+    """
+    boot = boot_identity()
+    name = 'runtime-' + identifier(conversation) + '.json'
+    if not boot:
+        return store.read(name)
+    lease = contextlib.nullcontext() if writer_held else writer(store,conversation)
+    with lease, events_lock(store,conversation):
+        state = store.read(name)
+        if not state or not owner or state.get('owner') != owner:
+            return state
+        info = (store.root / name).stat()
+        previous = state.get('boot') or {}
+        if not isinstance(previous,dict):
+            return state
+        if 'id' in previous:
+            try:
+                previous_id = str(uuid.UUID(previous['id']))
+            except (ValueError,TypeError,AttributeError):
+                return state
+            old_boot = previous_id != boot['id']
+        else:
+            old_boot = confirm_legacy and max(info.st_mtime_ns,info.st_ctime_ns) < boot['started_ns']
+            if old_boot and state.get('native_pid') is not None:
+                pid = state['native_pid']
+                if type(pid) is not int or pid <= 1:
+                    raise ValueError('Saved native PID is invalid; shutdown repair refused')
+                try:
+                    os.kill(pid,0)  # Existence check only; never signal a reused PID.
+                except ProcessLookupError:
+                    pass
+                except PermissionError as error:
+                    raise ValueError('Saved native PID still exists; shutdown repair refused') from error
+                else:
+                    raise ValueError('Saved native PID still exists; shutdown repair refused')
+        if not old_boot:
+            return state
+        backup = 'runtime-before-boot-' + conversation + '-' + uuid.uuid4().hex + '.json'
+        store.write(backup,state)
+        evidence = dict(reason='system-reboot',owner=owner,backup=backup,
+                        previous_boot=previous,current_boot=boot,confirmed=True,
+                        user_confirmed_legacy=bool(confirm_legacy and not previous.get('id')),
+                        previous_mtime_ns=info.st_mtime_ns,previous_ctime_ns=info.st_ctime_ns)
+        state.update(phase='stopped',native_pid=None,native_identity=None,worker_scope=None,
+                     tools=[],subagents=[],background_tools={},scheduled_work=[],scheduled_work_unknown=False,
+                     blocked=False,uncertain=False,error=None,turn='prompt',native_idle_snapshot=False,
+                     request=None,stop_result='rebooted',shutdown_evidence=None,last_shutdown=evidence,boot=boot)
+        store.write(name,state)
+        return state
 
 
 def apply_event(state, event, payload):
@@ -232,11 +304,23 @@ def supervise(shared, record, owner, profile, native, args, launcher):
             for flag in ('--resume','-r','--session-id'):
                 if flag in args and args[args.index(flag)+1] != conversation:
                     raise ValueError('Native conversation UUID differs from shared history')
-            prior = shared._runtime(conversation)
+            prior = reconcile_boot(store,conversation,owner,writer_held=True)
             if prior.get('native_pid') or prior.get('phase') in {'starting','running'}:
                 raise ValueError('Previous native shutdown is unconfirmed; inspect shared status before recovery')
             if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('scheduled_work') or prior.get('blocked') or prior.get('uncertain'):
                 raise ValueError('Previous worker activity or hook failure is unconfirmed')
+            if prior.get('stop_result') == 'rebooted':
+                # Thurbox may select new_session_args when rebooted hook state
+                # is absent. Recovery must resume the saved UUID, never start it
+                # as a fresh conversation merely because the pane is new.
+                if record.get('kind') == 'single':
+                    from .simple import Simple
+                    history = Simple(shared.accounts).transcript(record)
+                else:
+                    history = Path(record['transcript'])
+                if not history or not history.is_file():
+                    raise ValueError('Saved history is unavailable after reboot; no replacement conversation was started')
+                args = ['--resume' if arg == '--session-id' else arg for arg in args]
             if record.get('kind')!='single':
                 args=list(args)
                 for directory in record.get('native_dirs',[]):
@@ -246,13 +330,28 @@ def supervise(shared, record, owner, profile, native, args, launcher):
             args, settings = guarded_settings(args,launcher)
             settings_path = Path(record['transcript']).parent / ('hooks-' + owner + '.json')
             atomic_write(settings_path,dumps(settings))
+            from .processes import snapshot, worker_scope
+            scope = worker_scope(conversation,owner)
             update(store,conversation,owner=owner,phase='starting',native_pid=None,
+                   native_identity=None,worker_scope=scope,shutdown_evidence=None,boot=boot_identity(),
                    turn='unknown',tools=[],subagents=[],background_tools={},scheduled_work=[],scheduled_work_unknown=True,blocked=False,error=None,uncertain=False,request=None,stop_result=None)
             child = None
             try:
-                child = subprocess.Popen([native,*args,'--settings',str(settings_path)],
-                                         env=account_env(profile),cwd=record['cwd'])
-                update(store,conversation,phase='running',native_pid=child.pid)
+                from .continuation import startup_args, exec_failed
+                native_env=account_env(profile)
+                launch_args=startup_args(store,record,owner,profile,args)
+                try:
+                    child = subprocess.Popen([native,*launch_args,'--settings',str(settings_path)],
+                                             env=native_env,cwd=record['cwd'])
+                except OSError:
+                    exec_failed(store,record,owner)
+                    raise
+                native_identity = snapshot().get(child.pid)
+                if not native_identity:
+                    raise ValueError('Native process exited before its launch identity was recorded')
+                native_identity.update(command=str(Path(shutil.which(native) or native).resolve()),
+                                       conversation=conversation,settings=str(settings_path))
+                update(store,conversation,phase='running',native_pid=child.pid,native_identity=native_identity)
                 def forward(signum, _frame):
                     # Terminal SIGINT reaches our shared foreground group and
                     # therefore the child already; forwarding would double it.

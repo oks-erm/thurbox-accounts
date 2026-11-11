@@ -23,19 +23,20 @@ def main():
     prefix='''local state={}
 local store={selected="source"}
 local thurbox={runs={}}
-local FIXTURE={label="Account: Work A",loaded=true,current="a",phase="active",mode="on",accounts={
+local FIXTURE={label="Account: Work A",loaded=true,current="a",native="native-source",phase="active",mode="on",accounts={
 {name="a",label="Work A",email="a@example.invalid",org="Org A",saved=true},
 {name="b",label="Work B",email="b@example.invalid",org="Org B",saved=true}}}
 '''
     prefix+='''local command=function(verb,opts) if verb=="focus" then assert(opts.text=="agent") end end
 local run=function(key,cmd)
   assert(not cmd:find("verify%-shared"),"paid check invoked")
+  assert(cmd:find("'continue%-context'"),"chooser did not use saved context continuation")
   assert(cmd:find("'%-%-consent'"),"destination click did not approve")
   if state.round==2 then
     assert(cmd:find("'%-%-session' 'replacement'"),"switch back used the original empty session")
-    assert(cmd:find("'%-%-expected%-source' 'b'"),"wrong switch-back account")
+    assert(cmd:find("'--expected-native' 'native-source'",1,true),"source native UUID was not frozen")
   else
-    assert(cmd:find("'%-%-expected%-source' 'a'"),"source not frozen")
+    assert(cmd:find("'--expected-native' 'native-source'",1,true),"source not frozen")
     assert(cmd:find("'%-%-expected%-email' 'b@example.invalid'"),"target identity not frozen")
   end
   state.last_command=cmd
@@ -63,6 +64,18 @@ plugin.render({width=100,height=50})
 plugin.on_click({id="target:a"})
 plugin.render({width=100,height=50})
 assert(store.selected=="replacement2","switch back did not follow the new owner")
+state.round=3; FIXTURE.current=nil; FIXTURE.can_continue=true; FIXTURE.phase="ordinary"; FIXTURE.mode="off"
+FIXTURE.accounts[2].email="b@example.invalid"
+plugin.on_action("account-switch.open")
+plugin.render({width=60,height=8})
+local previous=state.last_command
+plugin.on_click({id="target:b"})
+assert(state.last_command==previous,"small screen allowed sharing without visible consent")
+plugin.render({width=100,height=50})
+assert(state.choice_ready,"ordinary conversation could not continue without a switching guard")
+plugin.on_click({id="target:b"})
+plugin.render({width=100,height=50})
+assert(store.selected=="replacement","ordinary context continuation did not follow destination")
 return plugin
 '''
     path.write_text(source)

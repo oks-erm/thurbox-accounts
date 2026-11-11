@@ -195,7 +195,7 @@ class Shared:
         return self.store.read('runtime-' + conversation + '.json')
 
     def _launch(self, record, index, *, recover=False):
-        from .guard import writer_available
+        from .guard import writer_available, reconcile_boot
         if record.get('mode',{}).get('enabled') is False and index != record['mode']['active_index']:
             raise ValueError('Account switching is Off; another account cannot be launched')
         self.validate(record)
@@ -206,7 +206,7 @@ class Shared:
         self.accounts.check_launch(target)
         if not writer_available(self.store, record['conversation']):
             raise ValueError('A managed writer is still running; target was not launched')
-        prior = self._runtime(record['conversation'])
+        prior = reconcile_boot(self.store,record['conversation'],record.get('allowed_session'))
         if prior.get('tools') or prior.get('subagents') or prior.get('background_tools') or prior.get('scheduled_work') or prior.get('blocked') or prior.get('uncertain'):
             raise ValueError('Previous worker activity or hook failure is unconfirmed; target was not launched')
         if prior.get('native_pid') or prior.get('phase') in {'starting','running'}:
@@ -335,8 +335,26 @@ class Shared:
             return self._launch(record,next_index)
 
     def _pause(self, record, *, allow_idle=False):
+        from .guard import reconcile_boot
         conversation = record['conversation']
         owner = record['allowed_session']
+        state = self._runtime(conversation)
+        # Only take the writer lease for boot recovery when it is available;
+        # a live guardian normally owns it throughout a regular account switch.
+        from .guard import writer_available
+        if writer_available(self.store,conversation):
+            state = reconcile_boot(self.store,conversation,owner)
+        evidence = state.get('shutdown_evidence') or {}
+        # Older guardians cannot account for already detached background jobs.
+        # Preserve their evidence rather than claiming those jobs were cancelled.
+        unscoped_workers = (not state.get('worker_scope') and
+                            any(state.get(k) for k in ('background_tools','subagents','scheduled_work')))
+        if (state.get('native_pid') and not unscoped_workers) or evidence.get('owner') == owner:
+            # A switch is an explicit request to cancel the current native work.
+            # This runs in the fresh CLI helper, including for older supervisors
+            # which cannot consume a new control action without restarting.
+            self._cancel_source(record, state)
+            return
         request = uuid.uuid4().hex
         self.store.write('control-' + conversation + '.json',dict(owner=owner,request=request,action='stop-idle' if allow_idle else 'stop'))
         deadline = time.monotonic() + (75 if allow_idle else 15)
@@ -373,6 +391,74 @@ class Shared:
         if self.tb.call('session','get',owner).get('stopped') is not True:
             raise ValueError('Thurbox did not confirm source stopped')
 
+    def _cancel_source(self, record, state):
+        from .guard import events_lock, writer_available
+        from .processes import alive, stop_tree
+        conversation, owner = record['conversation'], record['allowed_session']
+        if state.get('owner') != owner:
+            raise ValueError('Managed source ownership changed; no process was stopped')
+        request = uuid.uuid4().hex
+
+        def prepared(proof):
+            # Persist the captured workers before any parent can exit. A failed
+            # controller never turns a missing parent PID into shutdown proof.
+            # The caller holds events_lock before freezing: a frozen native hook
+            # must never hold the lock needed by this persistence callback.
+            current = self._runtime(conversation)
+            if current.get('owner') != owner:
+                raise ValueError('Managed source ownership changed')
+            current['shutdown_evidence'] = dict(proof, owner=owner, request=request, confirmed=False)
+            self.store.write('runtime-' + conversation + '.json', current)
+
+        if state.get('native_pid'):
+            with events_lock(self.store, conversation):
+                proof = stop_tree(state['native_pid'], self.accounts.claude.executable, conversation,
+                                  Path(record['transcript']).parent / ('hooks-' + owner + '.json'),
+                                  prepared=prepared,
+                                  launcher=Path(__file__).resolve().parents[1] / 'bin/thurbox-accounts-agent',
+                                  writer=self.store.root / ('writer-' + conversation + '.lock'),
+                                  identity=state.get('native_identity'),scope=state.get('worker_scope'))
+                prepared(proof)
+        else:
+            # Retry only an explicitly captured shutdown, never a guessed orphan.
+            proof = state.get('shutdown_evidence') or {}
+            if proof.get('owner') != owner or not proof.get('processes') or alive(proof['processes']):
+                raise ValueError('Previous native worker shutdown is unconfirmed; target was not launched')
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            current = self._runtime(conversation)
+            if current.get('owner') != owner:
+                raise ValueError('Managed source ownership changed during shutdown')
+            if (current.get('phase') == 'stopped' and not current.get('native_pid')
+                    and writer_available(self.store, conversation)):
+                break
+            time.sleep(.05)
+        else:
+            raise TimeoutError('Native supervisor did not release the conversation; target was not launched')
+        if alive(proof['processes']):
+            raise ValueError('Native workers remain; target was not launched')
+        self.tb.call('session','stop',owner)
+        if self.tb.call('session','get',owner).get('stopped') is not True:
+            raise ValueError('Thurbox did not confirm source stopped')
+        with events_lock(self.store, conversation):
+            current = self._runtime(conversation)
+            if current.get('owner') != owner or current.get('phase') != 'stopped' or current.get('native_pid'):
+                raise ValueError('Native source changed after shutdown; target was not launched')
+            # Cancellation is distinct from successful tool/task completion.
+            # Retain the old ledger and process evidence for inspection.
+            keys = ('tools','subagents','background_tools','scheduled_work','scheduled_work_unknown',
+                    'blocked','uncertain','error')
+            previous = current.get('shutdown_evidence') or {}
+            cancelled = (current.get('cancelled_work') if previous.get('confirmed')
+                         else {key: current.get(key) for key in keys})
+            current.update(tools=[],subagents=[],background_tools={},scheduled_work=[],
+                           scheduled_work_unknown=False,blocked=False,uncertain=False,error=None,
+                           turn='prompt',native_idle_snapshot=False,request=request,stop_result='cancelled',
+                           cancelled_work=cancelled,
+                           last_shutdown=dict(proof,owner=owner,request=request,confirmed=True,cancelled_work=cancelled),
+                           shutdown_evidence=dict(proof,owner=owner,request=request,confirmed=True))
+            self.store.write('runtime-' + conversation + '.json', current)
+
     def recover(self, conversation):
         with self.store.lock('transition-' + identifier(conversation)):
             record = self.load(conversation)
@@ -384,3 +470,31 @@ class Shared:
                 self.validate(record)
                 return self._launch(record,record['index'])
             return self._launch(record,record['index'],recover=True)
+
+    def repair_after_reboot(self, session, *, confirm=False):
+        """Explicit repair for old records which never stored a kernel boot ID."""
+        from .guard import reconcile_boot
+        from .simple import Simple
+        if not confirm:
+            raise ValueError('Confirm the OS/WSL rebooted since this session last ran with --confirm-reboot')
+        source = self.tb.call('session','get',session)
+        conversation = identifier(source['agent_session_id'])
+        with self.store.lock('transition-' + conversation):
+            record = self.load(conversation)
+            if record.get('allowed_session') != source['id']:
+                raise ValueError('Select the current managed session owner')
+            self.validate(record)
+            source = Simple(self.accounts).row(record)
+            if not (source.get('stopped') is True or
+                    source.get('state') == 'failed' and (source.get('launch_failure') or {}).get('reason') == 'exited'):
+                raise ValueError('Stop the affected session in Thurbox before repairing its shutdown record')
+            history = Simple(self.accounts).transcript(record) if record.get('kind') == 'single' else Path(record['transcript'])
+            if not history or not history.is_file():
+                raise ValueError('Saved history could not be located; shutdown evidence was preserved')
+            state = reconcile_boot(self.store,conversation,source['id'],confirm_legacy=True)
+            evidence = state.get('last_shutdown') or {}
+            if state.get('stop_result') != 'rebooted' or evidence.get('reason') != 'system-reboot':
+                raise ValueError('No earlier boot could be established; current process/task evidence was preserved')
+            return dict(session=source['id'],conversation=conversation,repaired=True,
+                        backup=str(self.store.root / evidence['backup']),
+                        next_action='Restart this existing Thurbox session to resume its saved history')

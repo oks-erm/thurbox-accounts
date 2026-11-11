@@ -14,6 +14,21 @@ def agent_name(profile):
     return 'Claude — ' + profile['label']
 
 
+def native_history(store, name, conversation):
+    projects=Path(store.get(name)['directory'])/'projects'
+    if not projects.exists(): return None
+    from .mode import checked
+    checked(projects,directory=True)
+    found=[]
+    for i,folder in enumerate(projects.iterdir()):
+        if i>=2000: raise ValueError('Too many native project directories to locate this conversation safely')
+        if folder.is_symlink(): continue
+        candidate=folder/(conversation+'.jsonl')
+        if candidate.exists() or candidate.is_symlink(): found.append(candidate)
+    if len(found)>1: raise ValueError('Native conversation UUID is ambiguous across project directories')
+    return found[0] if found else None
+
+
 class Simple:
     def __init__(self, accounts):
         self.accounts=accounts; self.store=accounts.profiles; self.tb=accounts.thurbox
@@ -86,19 +101,7 @@ class Simple:
         return record
 
     def transcript(self, record):
-        profile=self.store.get(record['profiles'][0])
-        projects=Path(profile['directory'])/'projects'
-        if not projects.exists(): return None
-        from .mode import checked
-        checked(projects,directory=True)
-        found=[]
-        for i,folder in enumerate(projects.iterdir()):
-            if i>=2000: raise ValueError('Too many native project directories to locate this conversation safely')
-            if folder.is_symlink(): continue
-            candidate=folder/(record['conversation']+'.jsonl')
-            if candidate.exists() or candidate.is_symlink(): found.append(candidate)
-        if len(found)>1: raise ValueError('Native conversation UUID is ambiguous across project directories')
-        return found[0] if found else None
+        return native_history(self.store,record['profiles'][0],record['conversation'])
 
     def source(self, session):
         from .guard import writer_available

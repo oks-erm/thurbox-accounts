@@ -215,3 +215,58 @@ independent idle_prompt with no background tasks, subagents or scheduled work.
 New prompts/tools/agents invalidate the snapshot. Quota alone, missing history,
 an old snapshot or a user-visible empty task display do not clear runtime evidence.
 Report missing completion as unconfirmed tracking, not proof of running work.
+
+## User-requested cancellation on switch (current)
+
+The user explicitly asks account switching to stop current work properly. For a
+live guarded source, destination selection authorizes cancellation of the exact
+native process tree. `processes.py` verifies its executable, UUID and owner hook
+settings before signals, captures workers before parents exit, tracks PID/start
+identities, terminates the paused tree without reopening an exit-handler fork
+race, and verifies all captured processes exit. New guards persist kernel launch
+identity before Claude replaces argv with its title; older Linux guards can be
+verified through their exact executable and supervisor launcher/UUID/writer lease.
+Linux guardians become child subreapers before native launch and persist their
+worker scope, so double-forked workers remain attributable and cancellable. Old
+guardians without that scope must still refuse unconfirmed background/subagent/
+scheduled ledgers; never claim ancestry alone proves already detached tasks exited.
+`Shared._cancel_source` also requires the supervisor's stopped state, writer lock
+release and Thurbox stop acknowledgement before clearing blockers as cancelled.
+Persist process evidence before shutdown and retain the cancelled task ledger.
+This supersedes hook-completion-as-a-stop-prerequisite for this explicit action;
+unknown/missing processes without captured shutdown evidence still fail closed.
+Never signal live user sessions during tests; use synthetic subprocesses.
+
+## Reboot recovery
+
+New guards persist the Linux kernel boot UUID. During explicit launch/switch,
+`guard.reconcile_boot` may archive and reset old process/task evidence only for
+a valid different boot UUID, under writer/events locks with the expected owner.
+Legacy wall-clock mtime/ctime do not prove reboot: automatic recovery preserves
+them. `repair-after-reboot --session REF --confirm-reboot` is the explicit legacy
+path, with user attestation of OS/WSL reboot, failed/exited or stopped local owner,
+saved history present, absent recorded native PID and both file dates pre-boot.
+Back up the complete prior runtime before reset; never touch transcript/sidecars.
+Same-boot or invalid boot IDs cannot be overridden. Repaired startup must resume
+the saved native UUID even if Thurbox passes new-session arguments. Read-only
+refresh never reconciles/mutates runtime records.
+
+## Saved-context continuation (current chooser)
+
+The user explicitly requested account switching via saved context, or a shared
+context environment across logged-in accounts. `continuation.py` is now the
+chooser's default. This is an explicit new conversation, not a silent fallback
+from failed native shared-history switching: its notice says so. Preserve the
+source UUID/history/session; authenticate only the destination. Copy only the
+selected owned transcript into private `contexts/UUID`, with readable excerpts,
+hashes and linked ancestral snapshots. Never copy credentials/config directories.
+Source shutdown/quota/worker markers do not gate independent read-only context.
+Use a fresh named-account destination with a new native UUID in the same worktree.
+Inject one initial read-context prompt immediately before native Popen, without
+persisting the prompt in agent_args or replaying it on restart. Preserve normal
+permissions/settings. Durably reserve destination IDs and origin lineage before
+creation; retries use the same ID. Never claim startup from runtime.running alone:
+verify actual local destination metadata and boot state. Unknown consumed bootstrap
+outcomes require inspection; only a known Popen exec failure may reset delivery.
+Manifest includes continuation.py. Validate test_continuation.py (synthetic guard
+processes, no models), the full suite and one_click_switch_smoke.py.
